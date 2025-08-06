@@ -1,0 +1,1 @@
+This is a POS system with Next JS and pouchDB
