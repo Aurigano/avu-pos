@@ -17,8 +17,8 @@ const Sidebar = () => {
     {
       name: 'INVOICES',
       icon: Receipt,
-      href: '/orders',
-      active: pathname === '/orders'
+      href: '/invoices',
+      active: pathname === '/invoices'
     }
   ]
 

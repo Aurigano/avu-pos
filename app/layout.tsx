@@ -9,6 +9,8 @@ export const metadata: Metadata = {
   description: 'Point of Sale system built with Next.js and PouchDB',
 }
 
+// Database configuration is now handled in individual components
+
 export default function RootLayout({
   children,
 }: {
@@ -16,7 +18,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        {children}
+      </body>
     </html>
   )
 } 
