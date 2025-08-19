@@ -152,9 +152,9 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
   }
 
   return (
-    <div className="flex gap-4">
+    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 w-full">
       {/* Product Search */}
-      <div ref={productSearchRef} className="relative">
+      <div ref={productSearchRef} className="relative flex-1 min-w-0">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
         <input
           type="text"
@@ -176,7 +176,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
             setFilteredProducts(filtered)
             setShowProductDropdown(filtered.length > 0)
           }}
-          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-96 focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
         />
         
         {showProductDropdown && (
@@ -192,7 +192,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
                     <img 
                       src={product.image} 
                       alt={product.item_name}
-                      className="w-8 h-8 object-cover rounded mr-3"
+                      className="w-8 h-8 object-cover rounded mr-3 flex-shrink-0"
                       onError={(e) => {
                         const target = e.currentTarget as HTMLImageElement;
                         const fallback = target.nextElementSibling as HTMLElement;
@@ -201,16 +201,16 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
                       }}
                     />
                   ) : (
-                    <div className="w-8 h-8 bg-gray-200 rounded mr-3 flex items-center justify-center">
+                    <div className="w-8 h-8 bg-gray-200 rounded mr-3 flex items-center justify-center flex-shrink-0">
                       <Search size={12} className="text-gray-400" />
                     </div>
                   )}
                   <div className="hidden w-8 h-8 bg-gray-200 rounded mr-3 flex items-center justify-center">
                     <Search size={12} className="text-gray-400" />
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-700 font-medium">{product.item_name}</span>
-                    <span className="text-xs text-gray-500">
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-gray-700 font-medium truncate">{product.item_name}</span>
+                    <span className="text-xs text-gray-500 truncate">
                       {product.item_group} • ${product.standard_selling_rate}
                     </span>
                   </div>
@@ -222,7 +222,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
       </div>
 
       {/* Customer Search */}
-      <div ref={customerSearchRef} className="relative">
+      <div ref={customerSearchRef} className="relative flex-1 min-w-0">
         <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
         <input
           type="text"
@@ -244,7 +244,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
             setFilteredCustomers(filtered)
             setShowCustomerDropdown(filtered.length > 0)
           }}
-          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-96 focus:outline-none focus:ring-2 focus:ring-green-500 text-black"
+          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-green-500 text-black"
         />
         
         {showCustomerDropdown && (
@@ -256,10 +256,10 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
                 className="px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
               >
                 <div className="flex items-center">
-                  <User size={16} className="text-gray-400 mr-2" />
-                  <div className="flex flex-col">
-                    <span className="text-gray-700 font-medium">{customer.customer_name}</span>
-                    <span className="text-xs text-gray-500">{customer.mobile_no || customer.email_id || customer.erpnext_id}</span>
+                  <User size={16} className="text-gray-400 mr-2 flex-shrink-0" />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-gray-700 font-medium truncate">{customer.customer_name}</span>
+                    <span className="text-xs text-gray-500 truncate">{customer.mobile_no || customer.email_id || customer.erpnext_id}</span>
                   </div>
                 </div>
               </div>
