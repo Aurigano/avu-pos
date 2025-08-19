@@ -4,7 +4,7 @@
 class ServiceWorkerManager {
   private serviceWorker: ServiceWorker | null = null;
   private messageId = 0;
-  private pendingMessages = new Map<number, { resolve: Function; reject: Function }>();
+  private pendingMessages = new Map<number, { resolve: Function; reject: Function; timeoutId?: NodeJS.Timeout }>();
 
   async initialize(): Promise<boolean> {
     try {
@@ -33,13 +33,15 @@ class ServiceWorkerManager {
 
       // Initialize database configuration
       const config = {
-        remoteUrl: process.env.NEXT_PUBLIC_COUCHDB_URL || 'http://localhost:5984/',
-        username: process.env.NEXT_PUBLIC_COUCHDB_USERNAME || '',
-        password: process.env.NEXT_PUBLIC_COUCHDB_PASSWORD || ''
+        remoteUrl: process.env.NEXT_PUBLIC_COUCHDB_URL || 'http://64.227.153.214:5984/',
+        username: process.env.NEXT_PUBLIC_COUCHDB_USERNAME || 'admin',
+        password: process.env.NEXT_PUBLIC_COUCHDB_PASSWORD || '123'
       };
 
       await this.sendMessage('INIT_DB', config);
       console.log('Service Worker initialized with database config');
+      console.log('Remote URL:', config.remoteUrl);
+      console.log('Username:', config.username);
 
       return true;
     } catch (error) {
@@ -56,7 +58,7 @@ class ServiceWorkerManager {
     return new Promise((resolve, reject) => {
       const messageId = ++this.messageId;
       
-      // Store the promise resolvers
+      // Store the promise resolvers (timeout will be added later)
       this.pendingMessages.set(messageId, { resolve, reject });
 
       // Create a message channel for communication
@@ -64,17 +66,28 @@ class ServiceWorkerManager {
       
       // Listen for response
       messageChannel.port1.onmessage = (event) => {
+        console.log('Service Worker Manager: Received response:', event.data);
         const { messageId: responseId, success, error, ...responseData } = event.data;
+        
+        console.log('Response details:', { responseId, success, error, hasResponseData: !!Object.keys(responseData).length });
         
         const pending = this.pendingMessages.get(responseId);
         if (pending) {
+          // Clear the timeout since we received a response
+          if (pending.timeoutId) {
+            clearTimeout(pending.timeoutId);
+          }
           this.pendingMessages.delete(responseId);
           
           if (success) {
+            console.log('Service Worker Manager: Operation successful, resolving promise');
             pending.resolve(responseData);
           } else {
+            console.log('Service Worker Manager: Operation failed:', error);
             pending.reject(new Error(error || 'Service Worker operation failed'));
           }
+        } else {
+          console.warn('Service Worker Manager: No pending message found for ID:', responseId);
         }
       };
 
@@ -84,14 +97,21 @@ class ServiceWorkerManager {
         [messageChannel.port2]
       );
 
-      // Timeout after 30 seconds
-      setTimeout(() => {
+      // Timeout after 10 seconds (reduced for debugging)
+      const timeoutId = setTimeout(() => {
         const pending = this.pendingMessages.get(messageId);
         if (pending) {
+          console.error('Service Worker Manager: Operation timed out for message ID:', messageId);
           this.pendingMessages.delete(messageId);
           pending.reject(new Error('Service Worker operation timeout'));
         }
-      }, 30000);
+      }, 10000);
+
+      // Add timeout ID to the existing pending message
+      const pending = this.pendingMessages.get(messageId);
+      if (pending) {
+        pending.timeoutId = timeoutId;
+      }
     });
   }
 

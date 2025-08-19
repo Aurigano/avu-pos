@@ -38,12 +38,31 @@ class PouchDBManager {
         revs_limit: 10 // Limit revision history to save space
       })
 
-      this._remoteDB = new PouchDB('http://admin:123@64.227.153.214:5984/posdb', {
+      // Get configuration from environment variables
+      const remoteUrl = process.env.NEXT_PUBLIC_COUCHDB_URL || 'http://64.227.153.214:5984/'
+      const username = process.env.NEXT_PUBLIC_COUCHDB_USERNAME || 'admin'
+      const password = process.env.NEXT_PUBLIC_COUCHDB_PASSWORD || '123'
+      
+      console.log('Raw remoteUrl:', remoteUrl)
+      
+      // Ensure remoteUrl ends with / and add database name
+      const baseUrl = remoteUrl.endsWith('/') ? remoteUrl : remoteUrl + '/'
+      const databaseName = 'posdb'
+      
+      // Construct the full database URL with authentication
+      const fullDbUrl = `${baseUrl.replace('://', `://${username}:${password}@`)}${databaseName}`
+      
+      console.log('Constructed fullDbUrl:', fullDbUrl)
+      
+      this._remoteDB = new PouchDB(fullDbUrl, {
         skip_setup: true // Skip database creation on remote
       })
 
+            console.log('Remote DB name:', this._remoteDB.name)
+
       this.initialized = true
       console.log('PouchDB instances initialized successfully')
+      console.log('Remote DB URL (sanitized):', fullDbUrl.replace(/:.*@/, ':***@')) // Log URL without exposing credentials
     } catch (error) {
       console.error('Failed to initialize PouchDB:', error)
       this.initialized = false

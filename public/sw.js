@@ -12,17 +12,39 @@ let isInitialized = false;
 // Initialize databases
 function initializeDatabases(config) {
   try {
+    console.log('Service Worker: Initializing with config:', { 
+      remoteUrl: config.remoteUrl, 
+      username: config.username, 
+      hasPassword: !!config.password 
+    });
+    
     localDB = new PouchDB('local_posdb');
     
     if (config.remoteUrl && config.username && config.password) {
-      const authUrl = `${config.remoteUrl.replace('://', `://${config.username}:${config.password}@`)}posdb`;
-      remoteDB = new PouchDB(authUrl);
+      // Ensure remoteUrl ends with / and add database name
+      const baseUrl = config.remoteUrl.endsWith('/') ? config.remoteUrl : config.remoteUrl + '/';
+      const databaseName = 'posdb';
+      
+      // Construct the full database URL with authentication
+      const fullDbUrl = `${baseUrl.replace('://', `://${config.username}:${config.password}@`)}${databaseName}`;
+      
+      console.log('Service Worker: Creating remote DB with URL:', fullDbUrl.replace(/:.*@/, ':***@'));
+      remoteDB = new PouchDB(fullDbUrl);
+      console.log('Service Worker: Remote DB created, name:', remoteDB.name);
+      
     } else if (config.remoteUrl) {
-      remoteDB = new PouchDB(`${config.remoteUrl}posdb`);
+      // Ensure remoteUrl ends with / and add database name  
+      const baseUrl = config.remoteUrl.endsWith('/') ? config.remoteUrl : config.remoteUrl + '/';
+      const databaseName = 'posdb';
+      const fullUrl = `${baseUrl}${databaseName}`;
+      
+      console.log('Service Worker: Creating remote DB without auth:', fullUrl);
+      remoteDB = new PouchDB(fullUrl);
+      console.log('Service Worker: Remote DB created, name:', remoteDB.name);
     }
     
     isInitialized = true;
-    console.log('Service Worker: Databases initialized');
+    console.log('Service Worker: Databases initialized successfully');
     return { success: true };
   } catch (error) {
     console.error('Service Worker: Database initialization failed:', error);
@@ -63,11 +85,21 @@ async function performSync(direction = 'both') {
     // Push from local to remote
     if (direction === 'push' || direction === 'both') {
       try {
+        console.log('Service Worker: Starting push replication...');
+        console.log('Service Worker: Local DB name:', localDB.name);
+        console.log('Service Worker: Remote DB name:', remoteDB.name);
+        
         const pushResult = await localDB.replicate.to(remoteDB);
         result.push.docs_written = pushResult.docs_written || 0;
         console.log(`Service Worker: Push completed - ${result.push.docs_written} docs sent`);
       } catch (pushError) {
         console.error('Service Worker: Push failed:', pushError);
+        console.error('Service Worker: Push error details:', {
+          name: pushError.name,
+          message: pushError.message,
+          status: pushError.status,
+          error: pushError.error
+        });
         result.push.errors.push(pushError.message);
       }
     }
@@ -110,12 +142,12 @@ self.addEventListener('message', async (event) => {
 
       case 'SYNC':
         const syncResult = await performSync(data.direction);
-        response = { ...response, ...syncResult };
+        response = { ...response, success: true, ...syncResult };
         break;
 
       case 'SAVE_INVOICE':
         const saveResult = await saveInvoice(data.invoice);
-        response = { ...response, ...saveResult };
+        response = { ...response, success: true, ...saveResult };
         break;
 
       case 'SAVE_AND_SYNC':

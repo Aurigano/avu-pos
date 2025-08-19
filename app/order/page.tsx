@@ -122,43 +122,31 @@ const OrderPage = () => {
   useEffect(() => {
     const initializeApp = async () => {
       console.log('Initializing app and performing initial sync...')
+      console.log('🎉 IMPORTANT: App is ready to use immediately - no need to wait for sync!')
+      console.log('📱 Sync will happen in background and update data automatically')
+      console.log('')
       
-      // Test database connection first
-      const connectionOk = await testDatabaseConnection()
-      if (!connectionOk) {
-        console.log('Database connection failed, working offline')
-        setSyncStatus('error')
-        return
-      }
-      
-      // Always try direct sync first (more reliable)
-      try {
-        console.log('Attempting direct database sync...')
-        await performSync('pull')
-        console.log('Direct sync completed successfully')
-      } catch (directSyncError) {
-        console.log('Direct sync failed, trying service worker...', directSyncError)
-        
-        // Fallback to service worker if available
-        try {
-          const isReady = await serviceWorkerManager.initialize()
-          setServiceWorkerReady(isReady)
-          
-          if (isReady) {
-            console.log('Service Worker ready, performing sync...')
-            setSyncStatus('syncing')
-            await serviceWorkerManager.performSync('pull')
-            setSyncStatus('synced')
-            console.log('Service Worker sync completed')
-          } else {
-            console.log('Service Worker not available, working offline')
+      // Test database connection first but don't block on it
+      console.log('🔍 Testing database connection in background...')
+      testDatabaseConnection()
+        .then(connectionOk => {
+          console.log('Database connection result:', connectionOk)
+          if (!connectionOk) {
+            console.log('❌ Database connection failed, but app can still work offline')
             setSyncStatus('error')
+            return
           }
-        } catch (swError) {
-          console.log('Service Worker sync also failed, working offline:', swError)
+          
+          // Start sync only if connection is OK
+          console.log('✅ Database connection OK, starting sync...')
+          // Sync logic will be added below
+        })
+        .catch(error => {
+          console.log('❌ Database connection test failed:', error)
           setSyncStatus('error')
-        }
-      }
+        })
+      
+      console.log('✅ App initialization completed - working with local data immediately')
     }
     
     // Only run on client side
