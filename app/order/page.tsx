@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar, CreditCard, DollarSign, Banknote } from 'lucide-react'
+import { Calendar, CreditCard, Banknote } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import OrderItem from '../../components/OrderItem'
 import SearchBar from '../../components/SearchBar'
@@ -79,8 +79,9 @@ const OrderPage = () => {
         // Pull from remote to local
         console.log('Pulling data from remote database...')
         const pullResult = await localDB.replicate.from(remoteDB, {
-          timeout: 30000, // 30 second timeout
-          retry: false    // retry automatically
+          // live: true,
+          // timeout: 30000, // 30 second timeout
+          retry: true    // retry automatically
         })
         console.log('Pull sync completed:', pullResult.docs_read, 'docs received')
       }
@@ -88,11 +89,12 @@ const OrderPage = () => {
       if (direction === 'push' || direction === 'both') {
         // Push from local to remote
         console.log('Pushing data to remote database...')
-        const pushResult = await localDB.replicate.to(remoteDB, {
-          timeout: 30000, // 30 second timeout
-          retry: false    // retry automatically
+        const pushResult = await localDB.sync(remoteDB, {
+          // timeout: 30000, // 30 second timeout
+          retry: true    // retry automatically
         })
-        console.log('Push sync completed:', pushResult.docs_written, 'docs sent')
+        console.log('Push sync completed:', pushResult)
+        // console.log('Push sync completed:', pushResult.docs_written, 'docs sent')
       }
       
       setSyncStatus('synced')
@@ -322,7 +324,7 @@ const OrderPage = () => {
         return
       }
 
-      // Check if all items have valid rates (allow $0, but not negative prices)
+      // Check if all items have valid rates (allow 0, but not negative prices)
       const invalidItems = orderItems.filter(item => item.price < 0)
       if (invalidItems.length > 0) {
         alert('All items must have a valid rate (cannot be negative).')
@@ -438,71 +440,43 @@ const OrderPage = () => {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50 overflow-x-hidden">
       <Sidebar />
       
-      <div className="flex-1 flex">
+      {/* Mobile-first responsive container */}
+      <div className="flex-1 flex flex-col lg:flex-row min-w-0">
         {/* Main Content */}
-        <div className="flex-1 p-6">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-4">
+        <div className="flex-1 p-3 sm:p-4 lg:p-6 min-w-0">
+          {/* Mobile-responsive Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4 lg:mb-6 gap-3 sm:gap-4">
+            <div className="flex-1 min-w-0">
               <SearchBar onItemSelect={handleAddItemFromSearch} onCustomerSelect={handleCustomerSelect} />
             </div>
             
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2 text-black">
-                <Calendar size={20} />
-                <span>{mounted ? currentDateTime : ''}</span>
-              </div>
-              
-              {/* Sync Status and Manual Sync */}
-              {/* Commenting temporarily */}
-              {/* <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${
-                  syncStatus === 'synced' ? 'bg-green-500' :
-                  syncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' :
-                  syncStatus === 'idle' ? 'bg-gray-500' :
-                  'bg-red-500'
-                }`}></div>
-                <span className="text-xs text-gray-600">
-                  {syncStatus === 'synced' ? 'Synced' :
-                   syncStatus === 'syncing' ? 'Syncing...' :
-                   syncStatus === 'error' ? 'Sync Failed' :
-                   'Not Synced'}
-                </span>
-                {syncStatus !== 'syncing' && (
-                  <>
-                    <button
-                      onClick={() => performSync('both')}
-                      className={`text-xs px-2 py-1 rounded ${
-                        syncStatus === 'error' 
-                          ? 'bg-red-100 text-red-700 hover:bg-red-200' 
-                          : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                      }`}
-                    >
-                      {syncStatus === 'error' ? 'Retry' : 'Sync'}
-                    </button>
-                    <button
-                      onClick={testDatabaseConnection}
-                      className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    >
-                      Test
-                    </button>
-                  </>
-                )}
-              </div> */}
+            {/* Date/Time - responsive display */}
+            <div className="flex items-center justify-center sm:justify-end space-x-2 text-black bg-white px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0">
+              <Calendar size={18} className="text-gray-600" />
+              <span className="text-xs sm:text-sm font-medium">
+                {mounted ? currentDateTime : 'Loading...'}
+              </span>
             </div>
           </div>
 
           {/* Order Details */}
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <span className="text-black font-medium">
+          <div className="bg-white rounded-lg shadow-sm min-w-0">
+            <div className="p-3 sm:p-4 lg:p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between min-w-0">
+                <div className="flex items-center space-x-4 min-w-0">
+                  <span className="text-black font-medium text-xs sm:text-sm lg:text-base break-all sm:break-words">
                     {mounted ? (
-                      `INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`
+                      <>
+                        <span className="hidden sm:inline">
+                          {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
+                        </span>
+                        <span className="sm:hidden">
+                          {`INV: SINV-${Date.now().toString().slice(-6)}`}
+                        </span>
+                      </>
                     ) : (
                       'INVOICE #: Loading...'
                     )}
@@ -511,152 +485,154 @@ const OrderPage = () => {
               </div>
             </div>
 
-            {/* Order Items Table */}
-            <div className="p-6">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left py-3 px-4 font-semibold text-black">ITEM</th>
-                    <th className="text-center py-3 px-4 font-semibold text-black">RATE</th>
-                    <th className="text-center py-3 px-4 font-semibold text-black">QTY</th>
-                    <th className="text-center py-3 px-4 font-semibold text-black">AMOUNT</th>
-                    <th className="text-center py-3 px-4 font-semibold text-black"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orderItems.length > 0 ? (
-                    orderItems.map((item) => (
-                      <OrderItem
-                        key={item.id}
-                        item={item}
-                        onRemove={handleRemoveItem}
-                        onQuantityChange={handleQuantityChange}
-                      />
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-gray-500">
-                        No items in order. Search and add products above.
-                      </td>
+            {/* Order Items Table - responsive */}
+            <div className="p-2 sm:p-4 lg:p-6">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[400px] sm:min-w-[500px]">
+                  <thead>
+                    <tr className="bg-gray-50">
+                      <th className="text-left py-2 lg:py-3 px-2 lg:px-4 font-semibold text-black text-xs lg:text-sm">ITEM</th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm">RATE</th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm">QTY</th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm">AMOUNT</th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm w-10"></th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {orderItems.length > 0 ? (
+                      orderItems.map((item) => (
+                        <OrderItem
+                          key={item.id}
+                          item={item}
+                          onRemove={handleRemoveItem}
+                          onQuantityChange={handleQuantityChange}
+                        />
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-gray-500 text-sm">
+                          No items in order. Search and add products above.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex justify-center mt-6">
+          {/* Action Buttons - mobile responsive */}
+          <div className="flex justify-center mt-3 sm:mt-4 lg:mt-6">
             <button 
               onClick={() => {
                 setOrderItems([])
                 setCashReceived('0')
                 setSelectedTip(0)
               }}
-              className="bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-8 rounded-lg mr-4"
+              className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 sm:py-3 px-4 sm:px-6 lg:px-8 rounded-lg text-sm lg:text-base"
             >
               CANCEL ORDER
             </button>
           </div>
         </div>
 
-        {/* Right Panel */}
-        <div className="w-80 bg-white border-l border-gray-200 p-6">
+        {/* Right Panel - Mobile Responsive */}
+        <div className="w-full lg:w-80 bg-white border-t lg:border-t-0 lg:border-l border-gray-200 p-3 sm:p-4 lg:p-6">
           {/* Total Payable Amount */}
-          <div className="mb-6 text-center">
-            <div className="text-lg font-semibold text-black mb-2">TOTAL PAYABLE AMOUNT</div>
-                            <div className="text-3xl font-bold text-orange-500">${subtotal.toFixed(2)}</div>
+          <div className="mb-3 sm:mb-4 lg:mb-6 text-center">
+            <div className="text-sm sm:text-base lg:text-lg font-semibold text-black mb-2">TOTAL PAYABLE AMOUNT</div>
+            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-orange-500">{subtotal.toFixed(2)}</div>
           </div>
 
-          {/* Tips Section */}
-          <div className="mb-6">
-            <div className="flex items-center mb-3">
-              <DollarSign size={20} className="text-gray-600 mr-2" />
-              <h3 className="font-semibold text-black">TIPS</h3>
+          {/* Mobile layout - vertical sections */}
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6">
+            
+            {/* Tips Section */}
+            <div>
+              <div className="flex items-center mb-2 sm:mb-3">
+                <Banknote size={20} className="text-gray-600 mr-2" />
+                <h3 className="font-semibold text-black text-sm lg:text-base">TIPS</h3>
+              </div>
+              <input
+                type="number"
+                value={selectedTip}
+                onChange={(e) => setSelectedTip(Number(e.target.value))}
+                placeholder="Enter tip amount"
+                className="py-2 lg:py-3 px-3 border border-gray-300 rounded text-sm w-full text-black"
+              />
             </div>
-            <div className="grid grid-cols-4 gap-2">
-                          {/* No preset tip amounts - users can enter custom tips */}
-            <input
-              type="number"
-              value={selectedTip}
-              onChange={(e) => setSelectedTip(Number(e.target.value))}
-              placeholder="Enter tip amount"
-              className="py-2 px-3 border border-gray-300 rounded text-sm w-full text-black"
-            />
-            </div>
-          </div>
 
-          {/* Transaction Methods */}
-          <div className="mb-6">
-            <div className="flex items-center mb-3">
-              <CreditCard size={20} className="text-gray-600 mr-2" />
-              <h3 className="font-semibold text-black">TRANSACTION METHOD</h3>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button 
-                onClick={() => setSelectedPaymentMethod('Cash')}
-                className={`py-3 px-4 rounded text-sm font-medium flex items-center justify-center space-x-2 ${
-                  selectedPaymentMethod === 'Cash'
-                    ? 'bg-gray-800 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                <Banknote size={16} />
-                <span>CASH</span>
-              </button>
-              <button 
-                onClick={() => setSelectedPaymentMethod('Card')}
-                className={`py-3 px-4 rounded text-sm font-medium hover:bg-gray-300 flex items-center justify-center space-x-2 ${
-                  selectedPaymentMethod === 'Card'
-                    ? 'bg-gray-800 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                <CreditCard size={16} />
-                <span>CARD</span>
-              </button>
+            {/* Transaction Methods */}
+            <div>
+              <div className="flex items-center mb-2 sm:mb-3">
+                <CreditCard size={20} className="text-gray-600 mr-2" />
+                <h3 className="font-semibold text-black text-sm lg:text-base">TRANSACTION METHOD</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => setSelectedPaymentMethod('Cash')}
+                  className={`py-2 lg:py-3 px-2 sm:px-3 lg:px-4 rounded text-xs lg:text-sm font-medium flex items-center justify-center space-x-1 lg:space-x-2 ${
+                    selectedPaymentMethod === 'Cash'
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  <Banknote size={16} />
+                  <span>CASH</span>
+                </button>
+                <button 
+                  onClick={() => setSelectedPaymentMethod('Card')}
+                  className={`py-2 lg:py-3 px-2 sm:px-3 lg:px-4 rounded text-xs lg:text-sm font-medium hover:bg-gray-300 flex items-center justify-center space-x-1 lg:space-x-2 ${
+                    selectedPaymentMethod === 'Card'
+                      ? 'bg-gray-800 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  <CreditCard size={16} />
+                  <span>CARD</span>
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Cash Received */}
           {selectedPaymentMethod === 'Cash' && (
-            <div className="mb-6">
+            <div className="mb-3 sm:mb-4 lg:mb-6 mt-3 sm:mt-4 lg:mt-0">
               <label className="block text-sm font-medium text-black mb-2">ADD CASH RECEIVED</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-lg font-bold text-black">$</span>
                 <input
                   type="number"
                   value={cashReceived}
                   onChange={(e) => setCashReceived(e.target.value)}
-                  className="pl-8 pr-4 py-3 border border-gray-300 rounded w-full text-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                  className="px-4 py-2 lg:py-3 border border-gray-300 rounded w-full text-lg lg:text-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 />
               </div>
             </div>
           )}
 
           {/* Payment Summary */}
-          <div className="space-y-2 mb-6">
+          <div className="space-y-2 mb-3 sm:mb-4 lg:mb-6 bg-gray-50 p-3 lg:p-4 rounded-lg">
             <div className="flex justify-between text-sm text-black">
               <span>PAYABLE AMOUNT</span>
-              <span>${subtotal.toFixed(2)}</span>
+              <span className="font-medium">{subtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-black">
               <span>TIPS</span>
-              <span>${tipAmount.toFixed(2)}</span>
+              <span className="font-medium">{tipAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-black">
               <span>SERVICE CHARGE 10%</span>
-              <span>${serviceCharge.toFixed(2)}</span>
+              <span className="font-medium">{serviceCharge.toFixed(2)}</span>
             </div>
-            <div className="border-t pt-3 mt-3">
-              <div className="flex justify-between text-xl font-bold text-black">
+            <div className="border-t border-gray-300 pt-3 mt-3">
+              <div className="flex justify-between text-base sm:text-lg lg:text-xl font-bold text-black">
                 <span>GRAND TOTAL</span>
-                <span>${total.toFixed(2)}</span>
+                <span>{total.toFixed(2)}</span>
               </div>
             </div>
           </div>
 
-          {/* Submit Button */}
+          {/* Submit Button - Mobile Responsive */}
           <button
             onClick={handleSubmit}
             disabled={
@@ -665,12 +641,12 @@ const OrderPage = () => {
               orderItems.some(item => item.price < 0) ||
               syncStatus === 'syncing'
             }
-            className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold py-4 rounded-lg text-lg transition-colors"
+            className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold py-3 lg:py-4 rounded-lg text-sm sm:text-base lg:text-lg transition-colors"
           >
             {syncStatus === 'syncing' ? (
               <span className="flex items-center justify-center space-x-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>{serviceWorkerReady ? 'SAVING & SYNCING...' : 'SAVING...'}</span>
+                <span className="text-sm lg:text-base">{serviceWorkerReady ? 'SAVING & SYNCING...' : 'SAVING...'}</span>
               </span>
             ) : orderItems.length === 0 ? (
               'ADD ITEMS TO SUBMIT'
@@ -683,28 +659,30 @@ const OrderPage = () => {
             )}
           </button>
 
-          {/* Validation Messages */}
+          {/* Validation Messages - Mobile Responsive */}
           {(orderItems.length === 0 || !selectedCustomer || orderItems.some(item => item.price <= 0)) && (
             <div className="mt-3 text-center">
-              <div className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+              <div className="text-xs lg:text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
                 <p className="font-medium mb-2">To submit this order, please ensure:</p>
                 <ul className="text-left space-y-1">
-                  <li className={`flex items-center ${orderItems.length > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    <span className="mr-2">{orderItems.length > 0 ? '✓' : '✗'}</span>
-                    Add at least one item to the order
+                  <li className={`flex items-start lg:items-center ${orderItems.length > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <span className="mr-2 mt-0.5 lg:mt-0">{orderItems.length > 0 ? '✓' : '✗'}</span>
+                    <span className="text-xs lg:text-sm">Add at least one item to the order</span>
                   </li>
-                  <li className={`flex items-center ${selectedCustomer ? 'text-green-600' : 'text-red-600'}`}>
-                    <span className="mr-2">{selectedCustomer ? '✓' : '✗'}</span>
-                    Select a customer (required)
+                  <li className={`flex items-start lg:items-center ${selectedCustomer ? 'text-green-600' : 'text-red-600'}`}>
+                    <span className="mr-2 mt-0.5 lg:mt-0">{selectedCustomer ? '✓' : '✗'}</span>
+                    <span className="text-xs lg:text-sm">Select a customer (required)</span>
                   </li>
-                  <li className={`flex items-center ${!orderItems.some(item => item.price < 0) ? 'text-green-600' : 'text-red-600'}`}>
-                    <span className="mr-2">{!orderItems.some(item => item.price < 0) ? '✓' : '✗'}</span>
-                    All items have valid prices (≥ $0)
-                                         {orderItems.some(item => item.price < 0) && (
-                       <span className="ml-2 text-xs text-red-500">
-                         (Items with negative prices: {orderItems.filter(item => item.price < 0).map(item => item.name).join(', ')})
-                       </span>
-                     )}
+                  <li className={`flex items-start lg:items-center ${!orderItems.some(item => item.price < 0) ? 'text-green-600' : 'text-red-600'}`}>
+                    <span className="mr-2 mt-0.5 lg:mt-0">{!orderItems.some(item => item.price < 0) ? '✓' : '✗'}</span>
+                    <div className="text-xs lg:text-sm">
+                      <span>All items have valid prices (≥ 0)</span>
+                      {orderItems.some(item => item.price < 0) && (
+                        <div className="text-xs text-red-500 mt-1">
+                          Items with negative prices: {orderItems.filter(item => item.price < 0).map(item => item.name).join(', ')}
+                        </div>
+                      )}
+                    </div>
                   </li>
                 </ul>
               </div>
