@@ -1,6 +1,6 @@
 'use client'
 
-import { ShoppingCart, Receipt } from 'lucide-react'
+import { ShoppingCart, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -16,7 +16,7 @@ const Sidebar = () => {
     },
     {
       name: 'INVOICES',
-      icon: Receipt,
+      icon: FileText,
       href: '/invoices',
       active: pathname === '/invoices'
     }

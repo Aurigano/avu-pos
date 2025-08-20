@@ -211,7 +211,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
                   <div className="flex flex-col min-w-0 flex-1">
                     <span className="text-gray-700 font-medium truncate">{product.item_name}</span>
                     <span className="text-xs text-gray-500 truncate">
-                      {product.item_group} • ${product.standard_selling_rate}
+                      {product.item_group} • {product.standard_selling_rate}
                     </span>
                   </div>
                 </div>

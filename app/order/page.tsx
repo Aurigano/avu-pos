@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar, CreditCard, DollarSign, Banknote } from 'lucide-react'
+import { Calendar, CreditCard, Banknote } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import OrderItem from '../../components/OrderItem'
 import SearchBar from '../../components/SearchBar'
@@ -324,7 +324,7 @@ const OrderPage = () => {
         return
       }
 
-      // Check if all items have valid rates (allow $0, but not negative prices)
+      // Check if all items have valid rates (allow 0, but not negative prices)
       const invalidItems = orderItems.filter(item => item.price < 0)
       if (invalidItems.length > 0) {
         alert('All items must have a valid rate (cannot be negative).')
@@ -541,7 +541,7 @@ const OrderPage = () => {
           {/* Total Payable Amount */}
           <div className="mb-3 sm:mb-4 lg:mb-6 text-center">
             <div className="text-sm sm:text-base lg:text-lg font-semibold text-black mb-2">TOTAL PAYABLE AMOUNT</div>
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-orange-500">${subtotal.toFixed(2)}</div>
+            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-orange-500">{subtotal.toFixed(2)}</div>
           </div>
 
           {/* Mobile layout - vertical sections */}
@@ -550,7 +550,7 @@ const OrderPage = () => {
             {/* Tips Section */}
             <div>
               <div className="flex items-center mb-2 sm:mb-3">
-                <DollarSign size={20} className="text-gray-600 mr-2" />
+                <Banknote size={20} className="text-gray-600 mr-2" />
                 <h3 className="font-semibold text-black text-sm lg:text-base">TIPS</h3>
               </div>
               <input
@@ -600,12 +600,11 @@ const OrderPage = () => {
             <div className="mb-3 sm:mb-4 lg:mb-6 mt-3 sm:mt-4 lg:mt-0">
               <label className="block text-sm font-medium text-black mb-2">ADD CASH RECEIVED</label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-lg font-bold text-black">$</span>
                 <input
                   type="number"
                   value={cashReceived}
                   onChange={(e) => setCashReceived(e.target.value)}
-                  className="pl-8 pr-4 py-2 lg:py-3 border border-gray-300 rounded w-full text-lg lg:text-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                  className="px-4 py-2 lg:py-3 border border-gray-300 rounded w-full text-lg lg:text-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 />
               </div>
             </div>
@@ -615,20 +614,20 @@ const OrderPage = () => {
           <div className="space-y-2 mb-3 sm:mb-4 lg:mb-6 bg-gray-50 p-3 lg:p-4 rounded-lg">
             <div className="flex justify-between text-sm text-black">
               <span>PAYABLE AMOUNT</span>
-              <span className="font-medium">${subtotal.toFixed(2)}</span>
+              <span className="font-medium">{subtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-black">
               <span>TIPS</span>
-              <span className="font-medium">${tipAmount.toFixed(2)}</span>
+              <span className="font-medium">{tipAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-black">
               <span>SERVICE CHARGE 10%</span>
-              <span className="font-medium">${serviceCharge.toFixed(2)}</span>
+              <span className="font-medium">{serviceCharge.toFixed(2)}</span>
             </div>
             <div className="border-t border-gray-300 pt-3 mt-3">
               <div className="flex justify-between text-base sm:text-lg lg:text-xl font-bold text-black">
                 <span>GRAND TOTAL</span>
-                <span>${total.toFixed(2)}</span>
+                <span>{total.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -677,7 +676,7 @@ const OrderPage = () => {
                   <li className={`flex items-start lg:items-center ${!orderItems.some(item => item.price < 0) ? 'text-green-600' : 'text-red-600'}`}>
                     <span className="mr-2 mt-0.5 lg:mt-0">{!orderItems.some(item => item.price < 0) ? '✓' : '✗'}</span>
                     <div className="text-xs lg:text-sm">
-                      <span>All items have valid prices (≥ $0)</span>
+                      <span>All items have valid prices (≥ 0)</span>
                       {orderItems.some(item => item.price < 0) && (
                         <div className="text-xs text-red-500 mt-1">
                           Items with negative prices: {orderItems.filter(item => item.price < 0).map(item => item.name).join(', ')}

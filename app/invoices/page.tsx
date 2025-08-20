@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar, User, DollarSign, CreditCard, Eye, Receipt, Clock, Printer } from 'lucide-react'
+import { Calendar, User, TrendingUp, CreditCard, Eye, Clock, Printer, Package, FileText } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import { localDB, remoteDB } from '@/lib/pouchdb'
 import QRCode from 'qrcode'
@@ -106,7 +106,7 @@ const InvoicesPage = () => {
   }
 
   const formatCurrency = (amount: number) => {
-    return `$${parseFloat(amount.toFixed(2))}`
+    return `${parseFloat(amount.toFixed(2))}`
   }
 
   /**
@@ -212,7 +212,7 @@ const InvoicesPage = () => {
               <!-- Items -->
               ${invoice.items && Array.isArray(invoice.items) ? invoice.items.map(item => `
                 <div style="margin-bottom: 8px;">
-                  <div style="font-size: 11px; font-weight: bold;">${item.item_id?.split('::').pop() || item.item_id} (${item.qty} @ $${item.rate.toFixed(2)})</div>
+                  <div style="font-size: 11px; font-weight: bold;">${item.item_id?.split('::').pop() || item.item_id} (${item.qty} @ ${item.rate.toFixed(2)})</div>
                   <div style="font-size: 9px; color: #666;">${item.item_id?.includes('::') ? item.item_id.split('::')[0] : ''}</div>
                   <div style="text-align: right; font-size: 11px; margin-top: 2px;">${item.amount.toFixed(2)}</div>
                 </div>
@@ -313,7 +313,7 @@ const InvoicesPage = () => {
 
       <div className="flex items-center justify-between text-xs sm:text-sm text-gray-600 mb-3 sm:mb-0">
         <div className="flex items-center min-w-0 mr-2">
-          <Receipt size={16} className="mr-1 flex-shrink-0" />
+          <Package size={16} className="mr-1 flex-shrink-0" />
           <span className="truncate">{invoice.items.length} items</span>
         </div>
         <div className="flex items-center min-w-0 mx-2">
@@ -506,7 +506,7 @@ const InvoicesPage = () => {
           </div>
         ) : invoices.length === 0 ? (
           <div className="bg-white rounded-lg shadow-sm p-8 sm:p-12 text-center">
-            <Receipt size={64} className="mx-auto text-gray-400 mb-4" />
+            <FileText size={64} className="mx-auto text-gray-400 mb-4" />
             <h3 className="text-lg sm:text-xl font-semibold text-gray-600 mb-2">No invoices found</h3>
             <p className="text-sm sm:text-base text-gray-500">Start creating orders to see invoices here.</p>
           </div>
@@ -516,7 +516,7 @@ const InvoicesPage = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-4 sm:mb-6">
               <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 lg:p-6">
                 <div className="flex items-center">
-                  <Receipt className="text-blue-500 mr-2 lg:mr-3" size={24} />
+                  <FileText className="text-blue-500 mr-2 lg:mr-3" size={24} />
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Total Invoices</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">{invoices.length}</p>
@@ -526,7 +526,7 @@ const InvoicesPage = () => {
               
               <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 lg:p-6">
                 <div className="flex items-center">
-                  <DollarSign className="text-green-500 mr-2 lg:mr-3" size={24} />
+                  <TrendingUp className="text-green-500 mr-2 lg:mr-3" size={24} />
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Total Revenue</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">

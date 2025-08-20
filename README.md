@@ -53,7 +53,7 @@ npm run dev
 - **Search**: Search for products or orders using the search bar
 - **Order Details**: View order number, table, time, and guest count
 - **Item Management**: Add/remove items from orders with real-time pricing
-- **Tip Selection**: Choose from preset tip amounts ($5, $10, $15, $20)
+- **Tip Selection**: Choose from preset tip amounts (5, 10, 15, 20)
 - **Payment Methods**: Select between Cash, Card, or Voucher
 - **Cash Received**: Input cash amount received from customer
 - **Order Summary**: View subtotal, tips, service charge (10%), and total

@@ -53,7 +53,7 @@ const OrderItem = ({ item, onRemove, onQuantityChange }: OrderItemProps) => {
         </div>
       </td>
       <td className="py-2 lg:py-3 px-1 lg:px-4 text-center font-medium text-black text-sm lg:text-base">
-        ${item.price.toFixed(2)}
+        {item.price.toFixed(2)}
       </td>
       <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
         <div className="flex items-center justify-center space-x-1 lg:space-x-2">
@@ -80,7 +80,7 @@ const OrderItem = ({ item, onRemove, onQuantityChange }: OrderItemProps) => {
         </div>
       </td>
       <td className="py-2 lg:py-3 px-1 lg:px-4 text-center font-medium text-black text-sm lg:text-base">
-        ${item.subtotal.toFixed(2)}
+        {item.subtotal.toFixed(2)}
       </td>
       <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
         <button
