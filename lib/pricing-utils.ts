@@ -112,7 +112,7 @@ export function getItemPriceFromList(
   // console.log('Getting price for item:', itemId)
 
   
-  const itemPriceEntries = itemPrices.filter(price => price.item === itemId)
+  const itemPriceEntries = itemPrices.filter(price => price.ItemCode === itemId)
   
   if (itemPriceEntries.length === 0) {
     // console.log('No price entries found for item:', itemId)

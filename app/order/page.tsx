@@ -303,7 +303,7 @@ const OrderPage = () => {
       } else {
         // Item doesn't exist, add new item
         // Get dynamic price from POS store
-        const priceResult = getItemPrice(product.item_name, product.item_name)
+        const priceResult = getItemPrice(product.item_code, product.item_code)
         const itemPrice = priceResult.isValid ? priceResult.price : (Number(product.standard_selling_rate) || 0)
         
         // console.log('Price lookup for', product.item_name, ':', priceResult)

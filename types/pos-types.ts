@@ -38,6 +38,7 @@ export interface ItemPriceList {
   SchemaVersion: string
   CreatedBy: string
   AuditLogId: string
+  ItemCode: string
 }
 
 export interface ItemWithPrice {

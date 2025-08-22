@@ -220,7 +220,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
                     <span className="text-xs text-gray-500 truncate">
                       {product.item_group} • {(() => {
                         // const priceResult = getItemPrice(product.item_code, product.item_code)
-                        const priceResult = getItemPrice(product.item_name, product.item_name)
+                        const priceResult = getItemPrice(product.item_code, product.item_code)
                         return priceResult.isValid ? priceResult.price.toFixed(2) : product.standard_selling_rate.toFixed(2)
                       })()}
                     </span>

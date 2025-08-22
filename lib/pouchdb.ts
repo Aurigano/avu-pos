@@ -38,7 +38,7 @@ class PouchDBManager {
         revs_limit: 10 // Limit revision history to save space
       })
 
-      this._remoteDB = new PouchDB('http://admin:123@64.227.153.214:5984/posdb', {
+      this._remoteDB = new PouchDB('https://admin:123@couchdbtest.etoserp.com:6984/posdb', {
         skip_setup: true // Skip database creation on remote
       })
 
