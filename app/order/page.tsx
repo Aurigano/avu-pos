@@ -8,6 +8,7 @@ import SearchBar from '../../components/SearchBar'
 import { useHydration } from '../../hooks/useHydration'
 import { localDB, remoteDB } from '@/lib/pouchdb'
 import serviceWorkerManager from '@/lib/service-worker-manager'
+import { usePOSStore } from '@/stores/pos-store'
 
 interface OrderItemType {
   id: string
@@ -32,6 +33,9 @@ const OrderPage = () => {
   const mounted = useHydration()
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
   const [serviceWorkerReady, setServiceWorkerReady] = useState(false)
+  
+  // POS Store
+  const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError } = usePOSStore()
 
   // Test database connection
   const testDatabaseConnection = async () => {
@@ -190,12 +194,24 @@ const OrderPage = () => {
 
         const allDocs = await localDB.allDocs({ include_docs: true });
         console.log('All local database documents:', allDocs.rows.map((row: any) => row.doc));
+        
+        // Initialize POS data (POSProfile and ItemPriceList)
+        // Checkpoint 1: Commented console logs
+        // console.log('Initializing POS pricing data...')
+        await initializePOSData()
+        
+        if (posLoadError) {
+          // console.error('POS data loading error:', posLoadError)
+        } else if (posDataLoaded) {
+          // console.log('POS data loaded successfully')
+        }
+        
       } catch (error) {
         console.error('Error loading data or creating indexes:', error);
       }
     };
     loadAllData();
-  }, []);
+  }, [initializePOSData]); // Added initializePOSData as dependency
 
   // Update current date and time
   useEffect(() => {
@@ -286,19 +302,28 @@ const OrderPage = () => {
         console.log('Updated existing item quantity')
       } else {
         // Item doesn't exist, add new item
+        // Get dynamic price from POS store
+        const priceResult = getItemPrice(product.item_code, product.item_code)
+        const itemPrice = priceResult.isValid ? priceResult.price : (Number(product.standard_selling_rate) || 0)
+        
+        // console.log('Price lookup for', product.item_name, ':', priceResult)
+        if (!priceResult.isValid) {
+          // console.warn('Using fallback price from standard_selling_rate for item:', product.item_name)
+        }
+        
         const newItem: OrderItemType = {
           id: `${product.item_name}-${Date.now()}`,
           name: product.item_name || 'Unknown Item',
           category: product.item_group || 'General',
-          price: Number(product.standard_selling_rate) || 0,
+          price: itemPrice,
           quantity: 1,
-          subtotal: Number(product.standard_selling_rate) || 0,
+          subtotal: itemPrice,
           item_id: product._id || product.erpnext_id || '',
           uom: product.default_uom || 'Unit',
           image: product.image || ''
         }
         setOrderItems([...orderItems, newItem])
-        console.log('Added new item:', newItem)
+        // console.log('Added new item with dynamic pricing:', newItem)
       }
     } catch (error) {
       console.error('Error adding item from search:', error)
@@ -460,6 +485,20 @@ const OrderPage = () => {
                 {mounted ? currentDateTime : 'Loading...'}
               </span>
             </div>
+            
+            {/* POS Data Status Indicator */}
+            {!posDataLoaded && (
+              <div className="flex items-center justify-center space-x-2 text-orange-600 bg-orange-50 px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0">
+                <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-xs sm:text-sm font-medium">Loading Prices...</span>
+              </div>
+            )}
+            
+            {posLoadError && (
+              <div className="flex items-center justify-center space-x-2 text-red-600 bg-red-50 px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0">
+                <span className="text-xs sm:text-sm font-medium">Price Error!</span>
+              </div>
+            )}
           </div>
 
           {/* Order Details */}
@@ -598,7 +637,7 @@ const OrderPage = () => {
           {/* Cash Received */}
           {selectedPaymentMethod === 'Cash' && (
             <div className="mb-3 sm:mb-4 lg:mb-6 mt-3 sm:mt-4 lg:mt-0">
-              <label className="block text-sm font-medium text-black mb-2">ADD CASH RECEIVED</label>
+              <label className="block text-sm font-medium text-black my-2">ADD CASH RECEIVED</label>
               <div className="relative">
                 <input
                   type="number"

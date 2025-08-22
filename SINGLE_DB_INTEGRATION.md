@@ -63,7 +63,7 @@ Your CouchDB posdb ←→ Service Worker ←→ Local PouchDB posdb ←→ React
 
 ## 🔧 **Configuration**
 
-### **CouchDB URL**: `http://64.227.153.214:5984/`
+### **CouchDB URL**: `https://couchdbtest.etoserp.com:6984/`
 ### **Database Name**: `posdb`
 
 ## 📋 **Document Examples**

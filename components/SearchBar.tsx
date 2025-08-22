@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, User } from 'lucide-react'
 import { localDB } from '../lib/pouchdb'
+import { usePOSStore } from '../stores/pos-store'
 
 interface Product {
   _id: string
@@ -49,6 +50,9 @@ interface SearchBarProps {
 }
 
 const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect }) => {
+  // POS Store
+  const { getItemPrice } = usePOSStore()
+  
   // Product search states
   const [productSearchTerm, setProductSearchTerm] = useState('')
   const [showProductDropdown, setShowProductDropdown] = useState(false)
@@ -62,6 +66,9 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([])
   const [allCustomers, setAllCustomers] = useState<Customer[]>([])
   const customerSearchRef = useRef<HTMLDivElement>(null)
+
+  // Checkpoint 1: Commented console logs
+  // console.log('allProducts', allProducts)
 
   // Load products and customers from database
   useEffect(() => {
@@ -211,7 +218,11 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
                   <div className="flex flex-col min-w-0 flex-1">
                     <span className="text-gray-700 font-medium truncate">{product.item_name}</span>
                     <span className="text-xs text-gray-500 truncate">
-                      {product.item_group} • {product.standard_selling_rate}
+                      {product.item_group} • {(() => {
+                        // const priceResult = getItemPrice(product.item_code, product.item_code)
+                        const priceResult = getItemPrice(product.item_code, product.item_code)
+                        return priceResult.isValid ? priceResult.price.toFixed(2) : product.standard_selling_rate.toFixed(2)
+                      })()}
                     </span>
                   </div>
                 </div>
