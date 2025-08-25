@@ -9,6 +9,7 @@ import { useHydration } from '../../hooks/useHydration'
 import { localDB, remoteDB } from '@/lib/pouchdb'
 import serviceWorkerManager from '@/lib/service-worker-manager'
 import { usePOSStore } from '@/stores/pos-store'
+import { printOrderReceipt } from '@/lib/print-utils'
 
 interface OrderItemType {
   id: string
@@ -26,13 +27,16 @@ interface OrderItemType {
 const OrderPage = () => {
   const [orderItems, setOrderItems] = useState<OrderItemType[]>([])
   const [cashReceived, setCashReceived] = useState<string>('0')
-  const [selectedTip, setSelectedTip] = useState<number>(0)
+  const [selectedDiscount, setSelectedDiscount] = useState<number>(0)
   const [currentDateTime, setCurrentDateTime] = useState<string>('')
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'Cash' | 'Card' | 'Voucher'>('Cash')
   const [selectedCustomer, setSelectedCustomer] = useState<string>('')
   const mounted = useHydration()
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
   const [serviceWorkerReady, setServiceWorkerReady] = useState(false)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [resetTrigger, setResetTrigger] = useState(0)
   
   // POS Store
   const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError } = usePOSStore()
@@ -83,9 +87,8 @@ const OrderPage = () => {
         // Pull from remote to local
         console.log('Pulling data from remote database...')
         const pullResult = await localDB.replicate.from(remoteDB, {
-          // live: true,
-          // timeout: 30000, // 30 second timeout
-          retry: true    // retry automatically
+          timeout: 15000, // 15 second timeout
+          retry: false    // Don't retry automatically to avoid hanging
         })
         console.log('Pull sync completed:', pullResult.docs_read, 'docs received')
       }
@@ -94,8 +97,8 @@ const OrderPage = () => {
         // Push from local to remote
         console.log('Pushing data to remote database...')
         const pushResult = await localDB.sync(remoteDB, {
-          // timeout: 30000, // 30 second timeout
-          retry: true    // retry automatically
+          timeout: 15000, // 15 second timeout
+          retry: false    // Don't retry automatically to avoid hanging
         })
         console.log('Push sync completed:', pushResult)
         // console.log('Push sync completed:', pushResult.docs_written, 'docs sent')
@@ -236,9 +239,9 @@ const OrderPage = () => {
   }, [])
 
   const subtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
-  const tipAmount = selectedTip
-  const serviceCharge = subtotal * 0.10 // 10% service charge
-  const total = subtotal + tipAmount + serviceCharge
+  const discountAmount = selectedDiscount
+  const vatAmount = subtotal * 0.15 // 15% VAT
+  const total = subtotal + vatAmount - discountAmount
 
   const handleRemoveItem = (id: string) => {
     setOrderItems(orderItems.filter(item => item.id !== id))
@@ -257,7 +260,7 @@ const OrderPage = () => {
       console.log('Adding item:', itemName)
       
       if (!localDB) {
-        alert('Database not available')
+        showToast('Database not available', 'error')
         return
       }
       
@@ -271,7 +274,7 @@ const OrderPage = () => {
       
       if (result.docs.length === 0) {
         console.error('Product not found in database:', itemName)
-        alert('Product not found in database')
+        showToast('Product not found in database', 'error')
         return
       }
       
@@ -281,7 +284,7 @@ const OrderPage = () => {
       // Ensure required fields exist
       if (!product.item_name) {
         console.error('Product missing item_name:', product)
-        alert('Invalid product data')
+        showToast('Invalid product data', 'error')
         return
       }
       
@@ -300,6 +303,7 @@ const OrderPage = () => {
         }
         setOrderItems(updatedItems)
         console.log('Updated existing item quantity')
+        showToast(`Updated ${product.item_name} quantity`, 'success')
       } else {
         // Item doesn't exist, add new item
         // Get dynamic price from POS store
@@ -323,11 +327,12 @@ const OrderPage = () => {
           image: product.image || ''
         }
         setOrderItems([...orderItems, newItem])
+        showToast(`Added ${product.item_name} to order`, 'success')
         // console.log('Added new item with dynamic pricing:', newItem)
       }
     } catch (error) {
       console.error('Error adding item from search:', error)
-      alert(`Error adding item: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      showToast(`Error adding item: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error')
     }
   }
 
@@ -336,28 +341,74 @@ const OrderPage = () => {
     console.log('Selected customer:', customerName)
   }
 
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000) // Auto-hide after 3 seconds
+  }
+
+  const handlePrintOrder = async () => {
+    const orderData = {
+      items: orderItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+        subtotal: item.subtotal
+      })),
+      customer: selectedCustomer,
+      paymentMethod: selectedPaymentMethod,
+      subtotal,
+      vatAmount,
+      discountAmount,
+      total,
+      cashReceived: selectedPaymentMethod === 'Cash' ? cashReceived : undefined,
+      currentDateTime
+    }
+
+    await printOrderReceipt(orderData)
+  }
+
+  const handleConfirmAndPrint = async () => {
+    await handleConfirmOrder()
+    setTimeout(() => {
+      handlePrintOrder()
+    }, 1000) // Small delay to ensure order is saved before printing
+  }
+
   const handleSubmit = async () => {
     try {
       // Validation checks
       if (orderItems.length === 0) {
-        alert('Please add items to the order before submitting.')
+        showToast('Please add items to the order before submitting.', 'error')
         return
       }
 
       if (!selectedCustomer) {
-        alert('🚨 Customer Selection Required!\n\nPlease select a customer using the search bar before submitting the order. This is mandatory for all orders.')
+        showToast('Customer Selection Required! Please select a customer using the search bar.', 'error')
         return
       }
 
       // Check if all items have valid rates (allow 0, but not negative prices)
       const invalidItems = orderItems.filter(item => item.price < 0)
       if (invalidItems.length > 0) {
-        alert('All items must have a valid rate (cannot be negative).')
+        showToast('All items must have a valid rate (cannot be negative).', 'error')
         return
       }
 
-      console.log('Submitting order with items:', orderItems)
+      // Show confirmation dialog instead of direct submission
+      setShowConfirmDialog(true)
+    } catch (error) {
+      console.error('Error in handleSubmit:', error)
+      showToast('An error occurred. Please try again.', 'error')
+    }
+  }
+
+  const handleConfirmOrder = async () => {
+    try {
+      setShowConfirmDialog(false)
       setSyncStatus('syncing')
+
+      console.log('Submitting order with items:', orderItems)
       
       // Generate invoice ID following the exact format
       const now = new Date()
@@ -366,8 +417,8 @@ const OrderPage = () => {
       
       // Calculate amounts
       const subtotalAmount = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
-      const serviceChargeAmount = subtotalAmount * 0.10 // 10% service charge
-      const totalAmount = subtotalAmount + selectedTip + serviceChargeAmount
+      const vatAmountForInvoice = subtotalAmount * 0.15 // 15% VAT
+      const totalAmount = subtotalAmount + vatAmountForInvoice - selectedDiscount
 
       // Prepare invoice data following the exact schema
       const invoiceData = {
@@ -396,13 +447,18 @@ const OrderPage = () => {
         })),
         taxes: [
           {
-            tax_type: "Service Charge",
-            tax_rate: 10,
-            tax_amount: serviceChargeAmount
+            tax_type: "VAT",
+            tax_rate: 15,
+            tax_amount: vatAmountForInvoice
           }
         ],
-        discounts: [],
-        tip_amount: selectedTip,
+        discounts: [
+          {
+            discount_type: "General Discount",
+            discount_amount: selectedDiscount
+          }
+        ],
+        tip_amount: 0,
         cash_received: selectedPaymentMethod === 'Cash' ? parseFloat(cashReceived) : 0,
         creation_date: now.toISOString(),
         modified_date: now.toISOString(),
@@ -443,24 +499,25 @@ const OrderPage = () => {
         }
         
         setSyncStatus('synced')
-        alert('Order submitted successfully!')
+        showToast('Order submitted successfully!', 'success')
         
         // Clear the order after successful submission
         setOrderItems([])
         setCashReceived('0')
-        setSelectedTip(0)
+        setSelectedDiscount(0)
         setSelectedCustomer('')
+        setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
         
       } catch (syncError) {
         console.error('Save and sync failed:', syncError)
         setSyncStatus('error')
-        alert('Failed to save order. Please try again.')
+        showToast('Failed to save order. Please try again.', 'error')
       }
       
     } catch (error) {
       console.error('Error submitting invoice:', error)
       setSyncStatus('error')
-      alert('Failed to submit invoice. Please try again.')
+      showToast('Failed to submit invoice. Please try again.', 'error')
     }
   }
 
@@ -475,7 +532,7 @@ const OrderPage = () => {
           {/* Mobile-responsive Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4 lg:mb-6 gap-3 sm:gap-4">
             <div className="flex-1 min-w-0">
-              <SearchBar onItemSelect={handleAddItemFromSearch} onCustomerSelect={handleCustomerSelect} />
+              <SearchBar onItemSelect={handleAddItemFromSearch} onCustomerSelect={handleCustomerSelect} resetTrigger={resetTrigger} />
             </div>
             
             {/* Date/Time - responsive display */}
@@ -566,7 +623,9 @@ const OrderPage = () => {
               onClick={() => {
                 setOrderItems([])
                 setCashReceived('0')
-                setSelectedTip(0)
+                setSelectedDiscount(0)
+                setSelectedCustomer('')
+                setResetTrigger(prev => prev + 1)
               }}
               className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 sm:py-3 px-4 sm:px-6 lg:px-8 rounded-lg text-sm lg:text-base"
             >
@@ -586,17 +645,17 @@ const OrderPage = () => {
           {/* Mobile layout - vertical sections */}
           <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6">
             
-            {/* Tips Section */}
+            {/* Discount Section */}
             <div>
               <div className="flex items-center mb-2 sm:mb-3">
                 <Banknote size={20} className="text-gray-600 mr-2" />
-                <h3 className="font-semibold text-black text-sm lg:text-base">TIPS</h3>
+                <h3 className="font-semibold text-black text-sm lg:text-base">DISCOUNT</h3>
               </div>
               <input
                 type="number"
-                value={selectedTip}
-                onChange={(e) => setSelectedTip(Number(e.target.value))}
-                placeholder="Enter tip amount"
+                value={selectedDiscount}
+                onChange={(e) => setSelectedDiscount(Number(e.target.value))}
+                placeholder="Enter discount amount"
                 className="py-2 lg:py-3 px-3 border border-gray-300 rounded text-sm w-full text-black"
               />
             </div>
@@ -656,12 +715,12 @@ const OrderPage = () => {
               <span className="font-medium">{subtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-black">
-              <span>TIPS</span>
-              <span className="font-medium">{tipAmount.toFixed(2)}</span>
+              <span>DISCOUNT</span>
+              <span className="font-medium">-{discountAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-black">
-              <span>SERVICE CHARGE 10%</span>
-              <span className="font-medium">{serviceCharge.toFixed(2)}</span>
+              <span>VAT 15%</span>
+              <span className="font-medium">{vatAmount.toFixed(2)}</span>
             </div>
             <div className="border-t border-gray-300 pt-3 mt-3">
               <div className="flex justify-between text-base sm:text-lg lg:text-xl font-bold text-black">
@@ -694,7 +753,7 @@ const OrderPage = () => {
             ) : orderItems.some(item => item.price < 0) ? (
               'ITEMS HAVE NEGATIVE PRICES'
             ) : (
-              'SUBMIT ORDER'
+              'REVIEW ORDER'
             )}
           </button>
 
@@ -729,8 +788,148 @@ const OrderPage = () => {
           )}
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Confirm Order</h2>
+                <button 
+                  onClick={() => setShowConfirmDialog(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Customer Info */}
+              <div className="mb-4 p-3 bg-gray-50 rounded">
+                <p className="text-sm text-gray-600">Customer: <span className="font-semibold text-gray-900">{selectedCustomer}</span></p>
+                <p className="text-sm text-gray-600">Payment: <span className="font-semibold text-gray-900">{selectedPaymentMethod}</span></p>
+              </div>
+
+              {/* Order Items */}
+              <div className="mb-4">
+                <h3 className="font-semibold text-gray-900 mb-2">Order Items:</h3>
+                <div className="border rounded overflow-hidden">
+                  {orderItems.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center p-2 border-b last:border-b-0 bg-white">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm text-gray-900">{item.name}</p>
+                        <p className="text-xs text-gray-600">{item.price.toFixed(2)} × {item.quantity}</p>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {item.subtotal.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Order Summary */}
+              <div className="mb-6 p-3 bg-gray-50 rounded">
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Subtotal:</span>
+                    <span className="text-gray-900">{subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">VAT (15%):</span>
+                    <span className="text-gray-900">{vatAmount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Discount:</span>
+                    <span className="text-gray-900">-{discountAmount.toFixed(2)}</span>
+                  </div>
+                  <hr className="my-2" />
+                  <div className="flex justify-between text-lg font-bold">
+                    <span className="text-gray-900">Grand Total:</span>
+                    <span className="text-gray-900">{total.toFixed(2)}</span>
+                  </div>
+                  {selectedPaymentMethod === 'Cash' && (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Cash Received:</span>
+                        <span className="text-gray-900">{cashReceived}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Change:</span>
+                        <span className="text-gray-900">{(parseFloat(cashReceived) - total).toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowConfirmDialog(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmOrder}
+                  disabled={syncStatus === 'syncing'}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400"
+                >
+                  {syncStatus === 'syncing' ? 'Saving...' : 'Submit'}
+                </button>
+                <button
+                  onClick={handleConfirmAndPrint}
+                  disabled={syncStatus === 'syncing'}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400"
+                >
+                  {syncStatus === 'syncing' ? 'Saving...' : 'Submit & Print'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 ${
+          toast.type === 'success' ? 'bg-green-500' :
+          toast.type === 'error' ? 'bg-red-500' :
+          'bg-blue-500'
+        }`}>
+          <div className="flex items-center space-x-2">
+            {toast.type === 'success' && (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            {toast.type === 'error' && (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            {toast.type === 'info' && (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <span>{toast.message}</span>
+            <button 
+              onClick={() => setToast(null)}
+              className="ml-2 text-white hover:text-gray-200"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-export default OrderPage 
+export default OrderPage

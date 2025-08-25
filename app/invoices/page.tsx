@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Calendar, User, TrendingUp, CreditCard, Eye, Clock, Printer, Package, FileText } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import { localDB, remoteDB } from '@/lib/pouchdb'
-import QRCode from 'qrcode'
+import { printInvoiceReceipt } from '@/lib/print-utils'
 
 interface POSInvoiceItem {
   item_id: string
@@ -109,184 +109,7 @@ const InvoicesPage = () => {
     return `${parseFloat(amount.toFixed(2))}`
   }
 
-  /**
-   * Generate QR code for invoice data
-   */
-  const generateInvoiceQRCode = async (invoice: POSInvoice): Promise<string> => {
-    const qrData = {
-      invoice_id: invoice.erpnext_id || invoice._id,
-      customer: invoice.customer_id?.split('::').pop() || 'Unknown',
-      total: invoice.total_amount,
-      date: invoice.creation_date,
-      payment_method: invoice.payment_method
-    }
 
-    try {
-      const qrCodeDataURL = await QRCode.toDataURL(JSON.stringify(qrData), {
-        width: 200,
-        margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF'
-        }
-      })
-      // Return just the base64 part without the data URL prefix
-      return qrCodeDataURL.split(',')[1]
-    } catch (error) {
-      console.error('Error generating QR code:', error)
-      return ''
-    }
-  }
-
-  /**
-   * Print invoice with dynamically generated QR code
-   */
-  const printInvoice = async (invoice: POSInvoice) => {
-    const qrCodeBase64 = await generateInvoiceQRCode(invoice)
-    
-    const printWindow = window.open('', '_blank')
-    if (printWindow) {
-      const printDate = new Date(invoice.creation_date)
-      const formattedDate = printDate.toLocaleDateString('en-GB')
-      const formattedTime = printDate.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: true 
-      })
-      
-      const subtotal = invoice.items && Array.isArray(invoice.items) 
-        ? invoice.items.reduce((sum, item) => sum + (item.rate * item.qty), 0)
-        : 0
-      
-      const totalTax = invoice.taxes && Array.isArray(invoice.taxes)
-        ? invoice.taxes.reduce((sum, tax) => sum + tax.tax_amount, 0)
-        : 0
-
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Invoice ${invoice.erpnext_id || invoice._id}</title>
-            <style>
-              body { margin: 0; padding: 0; }
-              @media print {
-                body * { visibility: hidden; }
-                .print-content, .print-content * { visibility: visible; }
-                .print-content {
-                  position: absolute;
-                  left: 0;
-                  top: 0;
-                  width: 58mm;
-                  font-size: 10px;
-                }
-                @page {
-                  size: 58mm auto;
-                  margin: 0;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="print-content" style="font-family: monospace; max-width: 58mm; padding: 10px; font-size: 12px; line-height: 1.2; color: #000;">
-              <!-- Company Header -->
-              <div style="text-align: center; margin-bottom: 10px;">
-                <div style="font-size: 16px; font-weight: bold; letter-spacing: 2px;">AVU</div>
-                <div style="font-size: 9px; margin-top: 2px;">Simplified Tax Invoice</div>
-              </div>
-
-              <!-- Location -->
-              <div style="text-align: center; margin-bottom: 10px; font-size: 10px;">
-                Welcome to AVU<br />Location TBD
-              </div>
-
-              <!-- Order Header -->
-              <div style="margin-bottom: 10px;">
-                <div style="font-size: 14px; font-weight: bold;">Order #${invoice.erpnext_id?.split('-').pop() || invoice._id.slice(-3)}</div>
-                <div style="font-size: 10px;">${formattedDate}        ${formattedTime}</div>
-                <div style="font-size: 10px;">Host: ${invoice.cashier_id || 'POS User'}</div>
-                <div style="font-size: 10px;">Order Type: ${invoice.is_pos ? 'Take Away' : 'Dine In'}</div>
-              </div>
-
-              <div style="border-top: 1px dashed #000; margin-bottom: 5px;"></div>
-
-              <!-- Items -->
-              ${invoice.items && Array.isArray(invoice.items) ? invoice.items.map(item => `
-                <div style="margin-bottom: 8px;">
-                  <div style="font-size: 11px; font-weight: bold;">${item.item_id?.split('::').pop() || item.item_id} (${item.qty} @ ${item.rate.toFixed(2)})</div>
-                  <div style="font-size: 9px; color: #666;">${item.item_id?.includes('::') ? item.item_id.split('::')[0] : ''}</div>
-                  <div style="text-align: right; font-size: 11px; margin-top: 2px;">${item.amount.toFixed(2)}</div>
-                </div>
-              `).join('') : ''}
-
-              <div style="border-top: 1px dashed #000; margin-top: 5px; margin-bottom: 5px;"></div>
-
-              <!-- Totals -->
-              <div style="text-align: center; font-size: 10px; margin-bottom: 5px;">Invoice Total</div>
-              <div style="font-size: 11px; margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between;">
-                  <span>Take Away Total</span>
-                  <span>${subtotal.toFixed(2)}</span>
-                </div>
-                ${totalTax > 0 ? `
-                  <div style="display: flex; justify-content: space-between; margin-top: 2px;">
-                    <span>VAT (${((totalTax/subtotal) * 100).toFixed(1)}%)</span>
-                    <span>${totalTax.toFixed(2)}</span>
-                  </div>
-                ` : ''}
-                <div style="display: flex; justify-content: space-between; margin-top: 2px; font-weight: bold;">
-                  <span>VISA #</span>
-                  <span>SR${invoice.total_amount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <!-- Payment Info -->
-              <div style="font-size: 9px; text-align: center; margin-bottom: 8px;">
-                Auth:<br />
-                Value Added Tax<br />
-                15.00% Tax Amount: ${totalTax.toFixed(2)}<br />
-                Thank you for choosing AVU<br />
-                Restaurant Services<br />
-                Business Location<br />
-                City - Postal Code
-              </div>
-
-              <!-- VAT Number -->
-              <div style="text-align: center; font-size: 10px; margin-bottom: 10px;">VAT: 300716182600003</div>
-
-              <!-- Footer -->
-              <div style="text-align: center; font-size: 10px; margin-bottom: 10px;">--- Check Closed ---</div>
-
-              <!-- QR Code -->
-              <div style="text-align: center; font-size: 9px; margin-bottom: 5px;">*** SCAN QR CODE ***</div>
-              
-              <div style="text-align: center; margin-bottom: 10px;">
-                ${qrCodeBase64 ? `
-                  <img 
-                    src="data:image/png;base64,${qrCodeBase64}"
-                    alt="QR Code"
-                    style="width: 80px; height: 80px; display: block; margin: 0 auto;"
-                  />
-                ` : `
-                  <div style="width: 80px; height: 80px; border: 1px solid #000; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 8px;">
-                    QR CODE
-                  </div>
-                `}
-              </div>
-            </div>
-            <script>
-              window.onload = function() {
-                window.print();
-                window.onafterprint = function() {
-                  window.close();
-                }
-              }
-            </script>
-          </body>
-        </html>
-      `)
-      printWindow.document.close()
-    }
-  }
 
   const InvoiceCard = ({ invoice }: { invoice: POSInvoice }) => (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-shadow cursor-pointer"
@@ -351,7 +174,7 @@ const InvoicesPage = () => {
               <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-black">Invoice Details</h2>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => printInvoice(invoice)}
+                  onClick={() => printInvoiceReceipt(invoice)}
                   className="flex items-center px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
                 >
                   <Printer size={16} className="mr-1 sm:mr-2" />

@@ -47,9 +47,10 @@ interface Customer {
 interface SearchBarProps {
   onItemSelect: (itemName: string) => void
   onCustomerSelect?: (customerName: string) => void
+  resetTrigger?: number
 }
 
-const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect }) => {
+const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect, resetTrigger }) => {
   // POS Store
   const { getItemPrice } = usePOSStore()
   
@@ -109,6 +110,14 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect })
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Reset customer field when resetTrigger changes
+  useEffect(() => {
+    if (resetTrigger !== undefined) {
+      setCustomerSearchTerm('')
+      setShowCustomerDropdown(false)
+    }
+  }, [resetTrigger])
 
   const handleProductInputChange = (value: string) => {
     setProductSearchTerm(value)
