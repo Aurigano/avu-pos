@@ -37,6 +37,8 @@ const OrderPage = () => {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [resetTrigger, setResetTrigger] = useState(0)
+  const [isDraftContinuation, setIsDraftContinuation] = useState(false)
+  const [draftId, setDraftId] = useState<string | null>(null)
   
   // POS Store
   const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError } = usePOSStore()
@@ -127,6 +129,94 @@ const OrderPage = () => {
     }
   }
   
+  // Function to continue from a draft invoice
+  const continueDraftInvoice = async (draftInvoiceId: string) => {
+    try {
+      if (!localDB) {
+        showToast('Database not available', 'error')
+        return
+      }
+
+      const draftInvoice = await localDB.get(draftInvoiceId) as any
+      
+      if (draftInvoice.type === 'POSInvoice' && draftInvoice.status === 'Draft') {
+        // Pre-populate order items from draft - get full product details
+        const draftItems: OrderItemType[] = []
+        
+        for (const item of draftInvoice.items) {
+          try {
+            console.log('Loading product for draft item:', item.item_id)
+            const product = await getProductById(item.item_id)
+            
+            // Get dynamic price from POS store (similar to handleAddItemFromSearch)
+            const priceResult = getItemPrice(product.item_code, product.item_code)
+            const itemPrice = priceResult.isValid ? priceResult.price : (Number(product.standard_selling_rate) || item.rate)
+            
+            const draftItem: OrderItemType = {
+              id: `${item.item_id}-${Date.now()}-${draftItems.length}`,
+              name: product.item_name || 'Unknown Item', // Use actual product name
+              category: product.item_group || 'General', // Use actual category
+              price: item.rate, // Keep the original draft price
+              quantity: item.qty,
+              subtotal: item.amount,
+              item_id: item.item_id,
+              uom: item.uom || product.default_uom || 'Unit', // Use product UOM if available
+              image: product.image || ''
+            }
+            
+            draftItems.push(draftItem)
+            console.log('Successfully loaded product:', product.item_name, 'for draft item')
+            
+          } catch (error) {
+            console.error('Failed to load product for draft item:', item.item_id, error)
+            
+            // Fallback: create item with limited info
+            const fallbackItem: OrderItemType = {
+              id: `${item.item_id}-${Date.now()}-${draftItems.length}`,
+              name: item.item_id?.split('::').pop() || 'Unknown Item',
+              category: 'General',
+              price: item.rate,
+              quantity: item.qty,
+              subtotal: item.amount,
+              item_id: item.item_id,
+              uom: item.uom || 'Unit'
+            }
+            
+            draftItems.push(fallbackItem)
+            console.warn('Using fallback item data for:', item.item_id)
+          }
+        }
+
+        console.log('DEBUG: Draft items with proper names:', draftItems)
+
+        setOrderItems(draftItems)
+        setSelectedCustomer(draftInvoice.customer_id?.split('::').pop() || '')
+        setSelectedPaymentMethod(draftInvoice.payment_method || 'Cash')
+        setCashReceived(draftInvoice.cash_received?.toString() || '0')
+        setSelectedDiscount(draftInvoice.discounts?.[0]?.discount_amount || 0)
+        setIsDraftContinuation(true)
+        setDraftId(draftInvoiceId)
+        
+        showToast('Draft invoice loaded successfully. Complete payment to generate invoice.', 'info')
+      }
+    } catch (error) {
+      console.error('Error loading draft invoice:', error)
+      showToast('Failed to load draft invoice', 'error')
+    }
+  }
+
+  // Check URL parameters for draft continuation
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const continueDraftId = urlParams.get('continueDraft')
+    
+    if (continueDraftId) {
+      continueDraftInvoice(continueDraftId)
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [])
+
   // Initialize and perform initial sync
   useEffect(() => {
     const initializeApp = async () => {
@@ -197,7 +287,8 @@ const OrderPage = () => {
 
         const allDocs = await localDB.allDocs({ include_docs: true });
         console.log('All local database documents:', allDocs.rows.map((row: any) => row.doc));
-        
+        // console log draft invoices
+        console.log('Draft invoices:', allDocs.rows.filter((row: any) => row.doc.type === 'POSInvoice' && row.doc.status === 'Draft'));
         // Initialize POS data (POSProfile and ItemPriceList)
         // Checkpoint 1: Commented console logs
         // console.log('Initializing POS pricing data...')
@@ -253,6 +344,43 @@ const OrderPage = () => {
         ? { ...item, quantity: newQuantity, subtotal: item.price * newQuantity }
         : item
     ))
+  }
+
+  // Helper function to get product by item ID
+  const getProductById = async (itemId: string) => {
+    if (!localDB) {
+      throw new Error('Database not available')
+    }
+    
+    try {
+      // Try to get the product directly by ID first
+      const directResult = await localDB.get(itemId) as any
+      if (directResult && directResult.type === 'Item') {
+        return directResult
+      }
+    } catch (e) {
+      // If direct get fails, try searching
+    }
+    
+    // Fallback: search by item ID in all Item documents
+    const result = await localDB.find({ 
+      selector: { 
+        type: 'Item'
+      } 
+    })
+    
+    const product = result.docs.find((doc: any) => 
+      doc._id === itemId || 
+      doc.erpnext_id === itemId ||
+      doc.item_code === itemId ||
+      itemId.includes(doc.item_code) // Handle cases like "Item::StoreA::POS1::ITEM001"
+    )
+    
+    if (!product) {
+      throw new Error(`Product not found for ID: ${itemId}`)
+    }
+    
+    return product as any
   }
 
   const handleAddItemFromSearch = async (itemName: string) => {
@@ -403,6 +531,204 @@ const OrderPage = () => {
     }
   }
 
+  const handleSaveDraft = async () => {
+    try {
+      setShowConfirmDialog(false)
+      setSyncStatus('syncing')
+
+      console.log('Saving draft with items:', orderItems)
+      console.log('Draft continuation state:', { isDraftContinuation, draftId })
+      
+      // Generate draft ID using scalable logic
+      const generateDraftId = (params: {
+        isDraftContinuation: boolean
+        existingDraftId: string | null
+        orderData?: any
+        customerData?: any
+        timestamp?: Date
+      }) => {
+        const { isDraftContinuation, existingDraftId, timestamp = new Date() } = params
+        
+        if (isDraftContinuation && existingDraftId) {
+          // Updating existing draft
+          return {
+            draftId: existingDraftId,
+            isNewDraft: false
+          }
+        } else {
+          // Create new draft with unique ID
+          const timestampValue = timestamp.getTime()
+          const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0')
+          const draftId = `POSInvoice::StoreA::POS1::DRAFT-${timestampValue}-${random}`
+          
+          return {
+            draftId: draftId,
+            isNewDraft: true
+          }
+        }
+        
+        // Future custom logic for drafts can go here:
+        // - Sequential draft numbering: await getNextDraftNumber()
+        // - User-specific draft IDs: generateUserDraftId(user, timestamp)
+        // - Session-based draft management: getSessionDraftId(session)
+      }
+      
+      const draftIdInfo = generateDraftId({
+        isDraftContinuation,
+        existingDraftId: draftId,
+        orderData: orderItems,
+        customerData: selectedCustomer,
+        timestamp: new Date()
+      })
+      
+      const { draftId: currentDraftId, isNewDraft } = draftIdInfo
+      console.log('Generated/Using draft ID:', currentDraftId, isNewDraft ? '(creating new)' : '(updating existing)')
+      
+      // Date/time for draft creation
+      const now = new Date()
+      
+      // Calculate amounts
+      const subtotalAmount = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
+      const vatAmountForInvoice = subtotalAmount * 0.15 // 15% VAT
+      const totalAmount = subtotalAmount + vatAmountForInvoice - selectedDiscount
+
+      // Prepare draft invoice data
+      const draftData: any = {
+        _id: currentDraftId,
+        type: "POSInvoice",
+        erpnext_id: null, // No invoice number for drafts
+        customer_id: `Customer::StoreA::POS1::${selectedCustomer || 'Walk-in Customer'}`,
+        posting_date: now.toISOString().split("T")[0],
+        posting_time: now.toTimeString().split(" ")[0],
+        due_date: now.toISOString().split("T")[0],
+        total_amount: totalAmount,
+        paid_amount: 0, // Not paid yet for drafts
+        payment_method: selectedPaymentMethod,
+        status: "Draft",
+        is_pos: true,
+        is_return_credit_note: false,
+        pos_profile_id: "POSProfile::StoreA::POS1::POS Profile 1",
+        cashier_id: "User::StoreA::POS1::pos_user",
+        store_id: "Store::StoreA",
+        items: orderItems.map(item => ({
+          item_id: item.item_id,
+          qty: item.quantity,
+          rate: item.price,
+          amount: item.subtotal,
+          uom: item.uom || 'Nos'
+        })),
+        taxes: [
+          {
+            tax_type: "VAT",
+            tax_rate: 15,
+            tax_amount: vatAmountForInvoice
+          }
+        ],
+        discounts: [
+          {
+            discount_type: "General Discount",
+            discount_amount: selectedDiscount
+          }
+        ],
+        tip_amount: 0,
+        cash_received: selectedPaymentMethod === 'Cash' ? parseFloat(cashReceived) : 0,
+        creation_date: now.toISOString(),
+        modified_date: now.toISOString(),
+        hash: "TEMP_HASH",
+        previous_hash: "PREV_HASH",
+        SchemaVersion: "1.0",
+        CreatedBy: "POS_USER",
+        AuditLogId: `Audit::StoreA::POS1::AUDIT-${Date.now().toString().slice(-6)}`
+      }
+
+      // Save draft to local database
+      try {
+        console.log('Saving draft to local database...')
+        
+        if (!localDB) {
+          throw new Error('Local database not available')
+        }
+
+        // Handle revision for existing drafts
+        if (isDraftContinuation && draftId && currentDraftId === draftId) {
+          try {
+            const existingDraft = await localDB.get(currentDraftId) as any
+            draftData._rev = existingDraft._rev
+            console.log('Updating existing draft with rev:', existingDraft._rev)
+          } catch (e) {
+            // Draft doesn't exist anymore, create new one
+            console.log('Existing draft not found, creating new one')
+          }
+        } else {
+          console.log('Creating brand new draft')
+        }
+        
+        // Save to local DB
+        await localDB.put(draftData)
+        console.log('Draft saved to local database successfully')
+        
+        setSyncStatus('synced')
+        showToast('Draft saved successfully!', 'success')
+        
+        // Clear the order after successful save
+        setOrderItems([])
+        setCashReceived('0')
+        setSelectedDiscount(0)
+        setSelectedCustomer('')
+        setIsDraftContinuation(false)
+        setDraftId(null)
+        setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
+        
+      } catch (syncError) {
+        console.error('Save draft failed:', syncError)
+        setSyncStatus('error')
+        showToast('Failed to save draft. Please try again.', 'error')
+      }
+      
+    } catch (error) {
+      console.error('Error saving draft:', error)
+      setSyncStatus('error')
+      showToast('Failed to save draft. Please try again.', 'error')
+    }
+  }
+
+  // Scalable invoice number generation function
+  // TODO: This can be replaced with custom logic later (API calls, sequential numbering, etc.)
+  const generateInvoiceNumber = (params: {
+    isDraftContinuation: boolean
+    draftId: string | null
+    orderData?: any
+    customerData?: any
+    timestamp?: Date
+  }) => {
+    const { isDraftContinuation, draftId, timestamp = new Date() } = params
+    
+    if (isDraftContinuation && draftId) {
+      // Converting draft to final invoice - keep existing draft ID
+      return {
+        invoiceId: draftId,
+        erpnextId: draftId.split("::")[3], // Extract invoice number from draft ID
+        isFromDraft: true
+      }
+    } else {
+      // New invoice - generate fresh ID
+      const timestampSuffix = Date.now().toString().slice(-6)
+      const invoiceId = `POSInvoice::StoreA::POS1::${timestampSuffix}`
+      
+      return {
+        invoiceId: invoiceId,
+        erpnextId: timestampSuffix, // Clean invoice number for display
+        isFromDraft: false
+      }
+    }
+    
+    // Future custom logic can go here:
+    // - Database sequential numbering: await getNextSequentialNumber()
+    // - API-based numbering: await fetchCustomInvoiceNumber(params)
+    // - Store-specific formats: generateStoreSpecificNumber(store, date)
+    // - Customer-based prefixes: generateCustomerInvoiceNumber(customer, date)
+  }
+
   const handleConfirmOrder = async () => {
     try {
       setShowConfirmDialog(false)
@@ -410,10 +736,20 @@ const OrderPage = () => {
 
       console.log('Submitting order with items:', orderItems)
       
-      // Generate invoice ID following the exact format
+      // Generate invoice number using scalable logic
+      const invoiceNumberData = generateInvoiceNumber({
+        isDraftContinuation,
+        draftId,
+        orderData: orderItems,
+        customerData: selectedCustomer,
+        timestamp: new Date()
+      })
+      
+      const { invoiceId, erpnextId, isFromDraft } = invoiceNumberData
+      console.log('Generated invoice number:', { invoiceId, erpnextId, isFromDraft })
+      
+      // Date/time for invoice creation
       const now = new Date()
-      const invoiceId = `POSInvoice::StoreA::POS1::${Date.now().toString().slice(-6)}`
-      const erpnextId = invoiceId.split("::")[3]
       
       // Calculate amounts
       const subtotalAmount = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
@@ -421,7 +757,7 @@ const OrderPage = () => {
       const totalAmount = subtotalAmount + vatAmountForInvoice - selectedDiscount
 
       // Prepare invoice data following the exact schema
-      const invoiceData = {
+      const invoiceData: any = {
         _id: invoiceId,
         type: "POSInvoice",
         erpnext_id: erpnextId,
@@ -477,6 +813,17 @@ const OrderPage = () => {
           throw new Error('Local database not available')
         }
         
+        // If continuing from draft, get the revision to update existing document
+        if (isDraftContinuation && draftId) {
+          try {
+            const existingDraft = await localDB.get(draftId) as any
+            invoiceData._rev = existingDraft._rev
+          } catch (e) {
+            // Draft doesn't exist, create new one
+            console.log('Draft not found, creating new invoice')
+          }
+        }
+        
         // Save to local DB first - this is the primary operation
         await localDB.put(invoiceData)
         console.log('Invoice saved to local database successfully')
@@ -506,6 +853,8 @@ const OrderPage = () => {
         setCashReceived('0')
         setSelectedDiscount(0)
         setSelectedCustomer('')
+        setIsDraftContinuation(false)
+        setDraftId(null)
         setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
         
       } catch (syncError) {
@@ -529,6 +878,20 @@ const OrderPage = () => {
       <div className="flex-1 flex flex-col lg:flex-row min-w-0">
         {/* Main Content */}
         <div className="flex-1 p-3 sm:p-4 lg:p-6 min-w-0">
+          {/* Draft Continuation Notice */}
+          {isDraftContinuation && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center">
+                <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-blue-800 text-sm font-medium">
+                  Continuing from draft invoice. Complete payment to generate final invoice with invoice number.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Mobile-responsive Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4 lg:mb-6 gap-3 sm:gap-4">
             <div className="flex-1 min-w-0">
@@ -566,12 +929,21 @@ const OrderPage = () => {
                   <span className="text-black font-medium text-xs sm:text-sm lg:text-base break-all sm:break-words">
                     {mounted ? (
                       <>
-                        <span className="hidden sm:inline">
-                          {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
-                        </span>
-                        <span className="sm:hidden">
-                          {`INV: SINV-${Date.now().toString().slice(-6)}`}
-                        </span>
+                        {isDraftContinuation ? (
+                          <>
+                            <span className="hidden sm:inline text-yellow-600">DRAFT INVOICE - NO INVOICE NUMBER YET</span>
+                            <span className="sm:hidden text-yellow-600">DRAFT</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="hidden sm:inline">
+                              {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
+                            </span>
+                            <span className="sm:hidden">
+                              {`INV: SINV-${Date.now().toString().slice(-6)}`}
+                            </span>
+                          </>
+                        )}
                       </>
                     ) : (
                       'INVOICE #: Loading...'
@@ -866,26 +1238,33 @@ const OrderPage = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex space-x-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-3">
                 <button
                   onClick={() => setShowConfirmDialog(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  className="px-3 lg:px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 text-sm lg:text-base"
                 >
                   Cancel
                 </button>
                 <button
+                  onClick={handleSaveDraft}
+                  disabled={syncStatus === 'syncing'}
+                  className="px-3 lg:px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 text-sm lg:text-base"
+                >
+                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Update Draft' : 'Save as Draft'}
+                </button>
+                <button
                   onClick={handleConfirmOrder}
                   disabled={syncStatus === 'syncing'}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400"
+                  className="px-3 lg:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : 'Submit'}
+                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Pay & Generate Invoice' : 'Submit'}
                 </button>
                 <button
                   onClick={handleConfirmAndPrint}
                   disabled={syncStatus === 'syncing'}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400"
+                  className="px-3 lg:px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : 'Submit & Print'}
+                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Pay & Print Invoice' : 'Submit & Print'}
                 </button>
               </div>
             </div>
