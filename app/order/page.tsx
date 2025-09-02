@@ -10,6 +10,7 @@ import { localDB, remoteDB } from '@/lib/pouchdb'
 import serviceWorkerManager from '@/lib/service-worker-manager'
 import { usePOSStore } from '@/stores/pos-store'
 import { printOrderReceipt } from '@/lib/print-utils'
+import { initializePOSProfile, getCurrentPOSProfile } from '@/lib/pos-profile-manager'
 
 interface OrderItemType {
   id: string
@@ -40,8 +41,30 @@ const OrderPage = () => {
   const [isDraftContinuation, setIsDraftContinuation] = useState(false)
   const [draftId, setDraftId] = useState<string | null>(null)
   
+  // POS Profile Permissions
+  const [posPermissions, setPosPermissions] = useState<{
+    enableCustomerDiscount: boolean
+    enableRateChange: boolean
+    enablePOSOffers: boolean
+    allowNegativeStock: boolean
+  } | null>(null)
+  
   // POS Store
-  const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError } = usePOSStore()
+  const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError, currentPOSProfile } = usePOSStore()
+
+  // Update permissions when POS profile changes
+  const updatePOSPermissions = () => {
+    const currentProfile = getCurrentPOSProfile()
+    if (currentProfile.permissions) {
+      setPosPermissions({
+        enableCustomerDiscount: currentProfile.permissions.enableCustomerDiscount,
+        enableRateChange: currentProfile.permissions.enableRateChange,
+        enablePOSOffers: currentProfile.permissions.enablePOSOffers,
+        allowNegativeStock: currentProfile.permissions.allowNegativeStock
+      })
+      console.log('📋 POS Permissions updated:', currentProfile.permissions)
+    }
+  }
 
   // Test database connection
   const testDatabaseConnection = async () => {
@@ -216,7 +239,7 @@ const OrderPage = () => {
       window.history.replaceState({}, document.title, window.location.pathname)
     }
   }, [])
-
+  
   // Initialize and perform initial sync
   useEffect(() => {
     const initializeApp = async () => {
@@ -289,15 +312,16 @@ const OrderPage = () => {
         console.log('All local database documents:', allDocs.rows.map((row: any) => row.doc));
         // console log draft invoices
         console.log('Draft invoices:', allDocs.rows.filter((row: any) => row.doc.type === 'POSInvoice' && row.doc.status === 'Draft'));
-        // Initialize POS data (POSProfile and ItemPriceList)
-        // Checkpoint 1: Commented console logs
-        // console.log('Initializing POS pricing data...')
-        await initializePOSData()
+        // Initialize POS data using the scalable profile manager
+        console.log('Initializing POS pricing data...')
+        const result = await initializePOSProfile()
         
-        if (posLoadError) {
-          // console.error('POS data loading error:', posLoadError)
-        } else if (posDataLoaded) {
-          // console.log('POS data loaded successfully')
+        if (result.success) {
+          console.log('✅ POS data loaded successfully with profile:', result.profileName)
+          // Update permissions after profile is loaded
+          updatePOSPermissions()
+        } else {
+          console.error('❌ POS data loading error:', result.error)
         }
         
       } catch (error) {
@@ -305,7 +329,7 @@ const OrderPage = () => {
       }
     };
     loadAllData();
-  }, [initializePOSData]); // Added initializePOSData as dependency
+  }, []); // POS profile initialization handled by profile manager
 
   // Update current date and time
   useEffect(() => {
@@ -342,6 +366,22 @@ const OrderPage = () => {
     setOrderItems(orderItems.map(item => 
       item.id === id 
         ? { ...item, quantity: newQuantity, subtotal: item.price * newQuantity }
+        : item
+    ))
+  }
+
+  // Handle rate changes (only allowed if user has permission)
+  const handleRateChange = (id: string, newRate: number) => {
+    // Check permission before allowing change
+    if (!posPermissions?.enableRateChange) {
+      console.warn('⚠️ Rate change attempted but user does not have permission')
+      return
+    }
+
+    console.log('💰 Rate changed for item:', id, 'New rate:', newRate)
+    setOrderItems(orderItems.map(item => 
+      item.id === id 
+        ? { ...item, price: newRate, subtotal: newRate * item.quantity }
         : item
     ))
   }
@@ -607,7 +647,7 @@ const OrderPage = () => {
         status: "Draft",
         is_pos: true,
         is_return_credit_note: false,
-        pos_profile_id: "POSProfile::StoreA::POS1::POS Profile 1",
+        pos_profile_id: currentPOSProfile?._id || "POSProfile::StoreA::POS1::POS Profile 1",
         cashier_id: "User::StoreA::POS1::pos_user",
         store_id: "Store::StoreA",
         items: orderItems.map(item => ({
@@ -771,7 +811,7 @@ const OrderPage = () => {
         status: "Submitted",
         is_pos: true,
         is_return_credit_note: false,
-        pos_profile_id: "POSProfile::StoreA::POS1::POS Profile 1",
+        pos_profile_id: currentPOSProfile?._id || "POSProfile::StoreA::POS1::POS Profile 1",
         cashier_id: "User::StoreA::POS1::pos_user",
         store_id: "Store::StoreA",
         items: orderItems.map(item => ({
@@ -935,13 +975,13 @@ const OrderPage = () => {
                             <span className="sm:hidden text-yellow-600">DRAFT</span>
                           </>
                         ) : (
-                          <>
-                            <span className="hidden sm:inline">
-                              {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
-                            </span>
-                            <span className="sm:hidden">
-                              {`INV: SINV-${Date.now().toString().slice(-6)}`}
-                            </span>
+                      <>
+                        <span className="hidden sm:inline">
+                          {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
+                        </span>
+                        <span className="sm:hidden">
+                          {`INV: SINV-${Date.now().toString().slice(-6)}`}
+                        </span>
                           </>
                         )}
                       </>
@@ -974,6 +1014,8 @@ const OrderPage = () => {
                           item={item}
                           onRemove={handleRemoveItem}
                           onQuantityChange={handleQuantityChange}
+                          onRateChange={handleRateChange}
+                          enableRateChange={posPermissions?.enableRateChange ?? false}
                         />
                       ))
                     ) : (
@@ -1017,20 +1059,36 @@ const OrderPage = () => {
           {/* Mobile layout - vertical sections */}
           <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6">
             
-            {/* Discount Section */}
-            <div>
-              <div className="flex items-center mb-2 sm:mb-3">
-                <Banknote size={20} className="text-gray-600 mr-2" />
-                <h3 className="font-semibold text-black text-sm lg:text-base">DISCOUNT</h3>
+            {/* Discount Section - Conditional based on POS Profile permissions */}
+            {posPermissions?.enableCustomerDiscount ? (
+              <div>
+                <div className="flex items-center mb-2 sm:mb-3">
+                  <Banknote size={20} className="text-gray-600 mr-2" />
+                  <h3 className="font-semibold text-black text-sm lg:text-base">DISCOUNT</h3>
+                </div>
+                <input
+                  type="number"
+                  value={selectedDiscount}
+                  onChange={(e) => setSelectedDiscount(Number(e.target.value))}
+                  placeholder="Enter discount amount"
+                  className="py-2 lg:py-3 px-3 border border-gray-300 rounded text-sm w-full text-black"
+                />
               </div>
-              <input
-                type="number"
-                value={selectedDiscount}
-                onChange={(e) => setSelectedDiscount(Number(e.target.value))}
-                placeholder="Enter discount amount"
-                className="py-2 lg:py-3 px-3 border border-gray-300 rounded text-sm w-full text-black"
-              />
-            </div>
+            ) : (
+              <div>
+                <div className="flex items-center mb-2 sm:mb-3">
+                  <Banknote size={20} className="text-gray-400 mr-2" />
+                  <h3 className="font-semibold text-gray-400 text-sm lg:text-base">DISCOUNT (Not Permitted)</h3>
+                </div>
+                <input
+                  type="number"
+                  value={selectedDiscount}
+                  disabled
+                  placeholder="Discount not allowed for this user"
+                  className="py-2 lg:py-3 px-3 border border-gray-200 rounded text-sm w-full text-gray-400 bg-gray-50 cursor-not-allowed"
+                />
+              </div>
+            )}
 
             {/* Transaction Methods */}
             <div>

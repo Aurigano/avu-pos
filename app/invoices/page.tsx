@@ -59,7 +59,7 @@ const InvoicesPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
 
-    // Load invoices from PouchDB
+  // Load invoices from PouchDB
   const loadInvoices = async () => {
     console.log('DEBUG: Starting to load invoices...')
     
@@ -220,10 +220,10 @@ const InvoicesPage = () => {
                 }}
                 className="text-blue-600 hover:text-blue-800 flex items-center"
               >
-                <Eye size={16} className="mr-1" />
-                <span className="hidden sm:inline">View Details</span>
-                <span className="sm:hidden">View</span>
-              </button>
+            <Eye size={16} className="mr-1" />
+            <span className="hidden sm:inline">View Details</span>
+            <span className="sm:hidden">View</span>
+          </button>
             )}
           </div>
         </div>
@@ -254,14 +254,14 @@ const InvoicesPage = () => {
                     <span className="sm:hidden">Continue</span>
                   </button>
                 ) : (
-                  <button
-                    onClick={() => printInvoiceReceipt(invoice)}
-                    className="flex items-center px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
-                  >
-                    <Printer size={16} className="mr-1 sm:mr-2" />
-                    <span className="hidden sm:inline">Print Receipt</span>
-                    <span className="sm:hidden">Print</span>
-                  </button>
+                <button
+                  onClick={() => printInvoiceReceipt(invoice)}
+                  className="flex items-center px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
+                >
+                  <Printer size={16} className="mr-1 sm:mr-2" />
+                  <span className="hidden sm:inline">Print Receipt</span>
+                  <span className="sm:hidden">Print</span>
+                </button>
                 )}
                 <button
                   onClick={() => setSelectedInvoice(null)}
@@ -280,7 +280,7 @@ const InvoicesPage = () => {
                 <h3 className="text-base sm:text-lg font-semibold text-black mb-2">Invoice Information</h3>
                 <div className="space-y-1 sm:space-y-2 text-sm">
                   {invoice.status !== 'Draft' ? (
-                    <div><span className="font-medium text-gray-700">Invoice ID:</span> <span className="text-black break-all">{invoice.erpnext_id || invoice._id}</span></div>
+                  <div><span className="font-medium text-gray-700">Invoice ID:</span> <span className="text-black break-all">{invoice.erpnext_id || invoice._id}</span></div>
                   ) : (
                     <div><span className="font-medium text-gray-700">Draft ID:</span> <span className="text-black break-all">{invoice._id}</span></div>
                   )}

@@ -14,9 +14,11 @@ interface OrderItemProps {
   }
   onRemove: (id: string) => void
   onQuantityChange: (id: string, newQuantity: number) => void
+  onRateChange?: (id: string, newRate: number) => void  // Optional callback for rate changes
+  enableRateChange?: boolean  // Permission to change rates
 }
 
-const OrderItem = ({ item, onRemove, onQuantityChange }: OrderItemProps) => {
+const OrderItem = ({ item, onRemove, onQuantityChange, onRateChange, enableRateChange = false }: OrderItemProps) => {
   const handleQuantityIncrease = () => {
     onQuantityChange(item.id, item.quantity + 1)
   }
@@ -24,6 +26,12 @@ const OrderItem = ({ item, onRemove, onQuantityChange }: OrderItemProps) => {
   const handleQuantityDecrease = () => {
     if (item.quantity > 1) {
       onQuantityChange(item.id, item.quantity - 1)
+    }
+  }
+
+  const handleRateChange = (newRate: number) => {
+    if (onRateChange && enableRateChange && newRate >= 0) {
+      onRateChange(item.id, newRate)
     }
   }
 
@@ -52,8 +60,25 @@ const OrderItem = ({ item, onRemove, onQuantityChange }: OrderItemProps) => {
           </div>
         </div>
       </td>
-      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center font-medium text-black text-sm lg:text-base">
-        {item.price.toFixed(2)}
+      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
+        {enableRateChange ? (
+          <input
+            type="number"
+            value={item.price}
+            onChange={(e) => handleRateChange(Number(e.target.value))}
+            step="0.01"
+            min="0"
+            className="w-16 lg:w-20 text-center font-medium text-black text-sm lg:text-base border border-gray-300 rounded px-1 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        ) : (
+          <span className="font-medium text-black text-sm lg:text-base">
+            {item.price.toFixed(2)}
+          </span>
+        )}
+        {/* // TODO: Remove this UI indicator when backend adds enable_rate_change to POSProfile */}
+        {/* {enableRateChange && (
+          <div className="text-xs text-blue-500 mt-1">✏️ Editable</div>
+        )} */}
       </td>
       <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
         <div className="flex items-center justify-center space-x-1 lg:space-x-2">
