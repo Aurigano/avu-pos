@@ -7,10 +7,10 @@ import OrderItem from '../../components/OrderItem'
 import SearchBar from '../../components/SearchBar'
 import { useHydration } from '../../hooks/useHydration'
 import { localDB, remoteDB } from '@/lib/pouchdb'
-import serviceWorkerManager from '@/lib/service-worker-manager'
 import { usePOSStore } from '@/stores/pos-store'
 import { printOrderReceipt } from '@/lib/print-utils'
-import { initializePOSProfile, getCurrentPOSProfile } from '@/lib/pos-profile-manager'
+import { getCurrentPOSProfile } from '@/lib/pos-profile-manager'
+import { databaseManager } from '@/lib/database-manager'
 
 interface OrderItemType {
   id: string
@@ -34,7 +34,6 @@ const OrderPage = () => {
   const [selectedCustomer, setSelectedCustomer] = useState<string>('')
   const mounted = useHydration()
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
-  const [serviceWorkerReady, setServiceWorkerReady] = useState(false)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [resetTrigger, setResetTrigger] = useState(0)
@@ -66,90 +65,9 @@ const OrderPage = () => {
     }
   }
 
-  // Test database connection
-  const testDatabaseConnection = async () => {
-    console.log('Testing database connection...')
-    
-    try {
-      if (!localDB) {
-        console.error('Local DB not available')
-        return false
-      }
-      
-      if (!remoteDB) {
-        console.error('Remote DB not available')
-        return false
-      }
-      
-      // Test local DB
-      const localInfo = await localDB.info()
-      console.log('Local DB info:', localInfo)
-      
-      // Test remote DB
-      const remoteInfo = await remoteDB.info()
-      console.log('Remote DB info:', remoteInfo)
-      
-      console.log('Database connection test successful')
-      return true
-    } catch (error) {
-      console.error('Database connection test failed:', error)
-      return false
-    }
-  }
-  
-  // One-time sync function
+  // Simple sync function for order operations only
   const performSync = async (direction: 'pull' | 'push' | 'both' = 'both') => {
-    setSyncStatus('syncing')
-    
-    try {
-      if (!localDB || !remoteDB) {
-        throw new Error('Database not available')
-      }
-
-      console.log(`Starting ${direction} sync...`)
-
-      if (direction === 'pull' || direction === 'both') {
-        // Pull from remote to local
-        console.log('Pulling data from remote database...')
-        const pullResult = await localDB.replicate.from(remoteDB, {
-          timeout: 15000, // 15 second timeout
-          retry: false    // Don't retry automatically to avoid hanging
-        })
-        console.log('Pull sync completed:', pullResult.docs_read, 'docs received')
-      }
-      
-      if (direction === 'push' || direction === 'both') {
-        // Push from local to remote
-        console.log('Pushing data to remote database...')
-        const pushResult = await localDB.sync(remoteDB, {
-          timeout: 15000, // 15 second timeout
-          retry: false    // Don't retry automatically to avoid hanging
-        })
-        console.log('Push sync completed:', pushResult)
-        // console.log('Push sync completed:', pushResult.docs_written, 'docs sent')
-      }
-      
-      setSyncStatus('synced')
-      console.log(`${direction} sync completed successfully`)
-    } catch (error: any) {
-      console.error('Sync failed:', error.message || error)
-      setSyncStatus('error')
-      
-      // Log specific error types
-      if (error.status === 401 || error.status === 403) {
-        console.log('Authentication error - check credentials')
-      } else if (error.status === 404) {
-        console.log('Database not found - check URL')
-      } else if (error.message && error.message.includes('CORS')) {
-        console.log('CORS error - check server configuration')
-      } else if (error.code === 'ENOTFOUND' || error.message?.includes('fetch')) {
-        console.log('Network error - check internet connection')
-      } else {
-        console.log('Unknown sync error:', error)
-      }
-      
-      throw error // Re-throw to let caller handle
-    }
+    return databaseManager.performSync(direction)
   }
   
   // Function to continue from a draft invoice
@@ -240,96 +158,28 @@ const OrderPage = () => {
     }
   }, [])
   
-  // Initialize and perform initial sync
+  // Check database initialization status
   useEffect(() => {
-    const initializeApp = async () => {
-      console.log('Initializing app and performing initial sync...')
-      
-      // Test database connection first
-      const connectionOk = await testDatabaseConnection()
-      if (!connectionOk) {
-        console.log('Database connection failed, working offline')
-        setSyncStatus('error')
-        return
-      }
-      
-      // Always try direct sync first (more reliable)
-      try {
-        console.log('Attempting direct database sync...')
-        await performSync('pull')
-        console.log('Direct sync completed successfully')
-      } catch (directSyncError) {
-        console.log('Direct sync failed, trying service worker...', directSyncError)
-        
-        // Fallback to service worker if available
-        try {
-          const isReady = await serviceWorkerManager.initialize()
-          setServiceWorkerReady(isReady)
-          
-          if (isReady) {
-            console.log('Service Worker ready, performing sync...')
-            setSyncStatus('syncing')
-            await serviceWorkerManager.performSync('pull')
-            setSyncStatus('synced')
-            console.log('Service Worker sync completed')
-          } else {
-            console.log('Service Worker not available, working offline')
-            setSyncStatus('error')
-          }
-        } catch (swError) {
-          console.log('Service Worker sync also failed, working offline:', swError)
-          setSyncStatus('error')
-        }
-      }
-    }
+    // Check if database was initialized during login
+    const dbInitialized = localStorage.getItem('dbInitialized')
+    const posProfileName = localStorage.getItem('posProfileName')
     
-    // Only run on client side
-    if (typeof window !== 'undefined') {
-      initializeApp()
+    if (dbInitialized === 'true') {
+      setSyncStatus('synced')
+      console.log('✅ Database already initialized during login')
+      if (posProfileName) {
+        console.log('✅ POS Profile loaded:', posProfileName)
+      }
+    } else {
+      console.log('⚠️ Database not initialized during login, working in offline mode')
+      setSyncStatus('error')
     }
+
+    // Update POS permissions regardless of DB status
+    updatePOSPermissions()
   }, []);
 
-  // Load all data from local database and create indexes
-  useEffect(() => {
-    const loadAllData = async () => {
-      if (!localDB) return;
-      
-      try {
-        // Create necessary indexes
-        await localDB.createIndex({
-          index: {
-            fields: ['type', 'CreatedBy', 'creation_date']
-          }
-        })
-        
-        await localDB.createIndex({
-          index: {
-            fields: ['type', 'item_name']
-          }
-        })
 
-        const allDocs = await localDB.allDocs({ include_docs: true });
-        console.log('All local database documents:', allDocs.rows.map((row: any) => row.doc));
-        // console log draft invoices
-        console.log('Draft invoices:', allDocs.rows.filter((row: any) => row.doc.type === 'POSInvoice' && row.doc.status === 'Draft'));
-        // Initialize POS data using the scalable profile manager
-        console.log('Initializing POS pricing data...')
-        const result = await initializePOSProfile()
-        
-        if (result.success) {
-          console.log('✅ POS data loaded successfully with profile:', result.profileName)
-          // Update permissions after profile is loaded
-          updatePOSPermissions()
-        } else {
-          console.error('❌ POS data loading error:', result.error)
-        }
-        
-      } catch (error) {
-        console.error('Error loading data or creating indexes:', error);
-      }
-    };
-    loadAllData();
-  }, []); // POS profile initialization handled by profile manager
 
   // Update current date and time
   useEffect(() => {
@@ -871,14 +721,11 @@ const OrderPage = () => {
         // Now try to sync to remote (secondary operation)
         try {
           console.log('Syncing to remote database...')
-          if (serviceWorkerReady) {
-            // Try service worker sync
-            await serviceWorkerManager.performSync('push')
-            console.log('Remote sync completed via Service Worker')
+          const syncResult = await performSync('push')
+          if (syncResult.success) {
+            console.log('Remote sync completed successfully')
           } else {
-            // Direct sync to remote
-            await performSync('push')
-            console.log('Remote sync completed directly')
+            console.log('Remote sync failed:', syncResult.error)
           }
         } catch (syncError) {
           console.log('Remote sync failed, but order was saved locally:', syncError)
@@ -1174,7 +1021,7 @@ const OrderPage = () => {
             {syncStatus === 'syncing' ? (
               <span className="flex items-center justify-center space-x-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-sm lg:text-base">{serviceWorkerReady ? 'SAVING & SYNCING...' : 'SAVING...'}</span>
+                <span className="text-sm lg:text-base">SAVING...</span>
               </span>
             ) : orderItems.length === 0 ? (
               'ADD ITEMS TO SUBMIT'
