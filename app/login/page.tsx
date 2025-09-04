@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { User, Lock, LogIn, Database, Wifi, HardDrive, Settings } from 'lucide-react'
 import { databaseManager } from '@/lib/database-manager'
+import { authApi, handleApiError, type LoginResponse, type ApiError } from '@/lib/api-service'
 
 const LoginPage = () => {
   const [username, setUsername] = useState('')
@@ -55,17 +56,18 @@ const LoginPage = () => {
     setShowProgress(false)
 
     try {
-      // TODO: Implement actual authentication logic here
-      // For now, we'll just simulate a login process
+      // Call the authentication API using centralized service
+      console.log('🔐 Authenticating user...')
       
-      // Simulate API call delay for authentication
-      await new Promise(resolve => setTimeout(resolve, 800))
+      const authData: LoginResponse = await authApi.login(username, password)
       
-      // For demo purposes, accept any non-empty credentials
-      if (username.trim() && password.trim()) {
-        // Store user session
-        localStorage.setItem('isLoggedIn', 'true')
-        localStorage.setItem('username', username)
+      // Authentication successful - store user data
+      localStorage.setItem('isLoggedIn', 'true')
+      localStorage.setItem('authResponse', JSON.stringify(authData))
+      localStorage.setItem('userInfo', JSON.stringify(authData.message.user))
+      localStorage.setItem('sessionId', authData.message.user.session_id)
+      
+      console.log('✅ Authentication successful for user:', authData.message.user.full_name)
         
         // Show database initialization progress
         setShowProgress(true)
@@ -87,7 +89,6 @@ const LoginPage = () => {
           console.log('✅ Database initialization completed successfully')
           // Store initialization state
           localStorage.setItem('dbInitialized', 'true')
-          localStorage.setItem('posProfileName', initResult.posProfileName || '')
           
           // Redirect to selection page
           router.push('/select')
@@ -102,12 +103,13 @@ const LoginPage = () => {
             router.push('/select')
           }, 3000)
         }
-      } else {
-        setError('Invalid credentials')
-      }
+        
     } catch (err: any) {
       console.error('Login or initialization failed:', err)
-      setError(`Login failed: ${err.message || 'Please try again.'}`)
+      
+      // Use centralized error handler for API errors
+      const errorMessage = handleApiError(err as ApiError)
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
       setShowProgress(false)
@@ -176,19 +178,6 @@ const LoginPage = () => {
             </div>
           </div>
 
-          {/* Progress Message */}
-          {showProgress && initializationStep && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="flex items-center">
-                <div className="flex items-center mr-3">
-                  {getProgressIcon(initializationStep)}
-                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin ml-2"></div>
-                </div>
-                <p className="text-blue-800 text-sm font-medium">{getProgressMessage(initializationStep)}</p>
-              </div>
-            </div>
-          )}
-
           {/* Error Message */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
@@ -221,22 +210,6 @@ const LoginPage = () => {
               )}
             </button>
           </div>
-
-          {/* Demo Instructions */}
-          {/* <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-start">
-              <svg className="w-5 h-5 text-blue-600 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div>
-                <p className="text-blue-800 text-sm font-medium mb-1">Demo Mode</p>
-                <p className="text-blue-700 text-xs">
-                  Enter any username and password to access the POS system. 
-                  Authentication logic can be implemented later.
-                </p>
-              </div>
-            </div>
-          </div> */}
         </form>
       </div>
     </div>

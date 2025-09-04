@@ -73,12 +73,13 @@ const OrderPage = () => {
   // Function to continue from a draft invoice
   const continueDraftInvoice = async (draftInvoiceId: string) => {
     try {
-      if (!localDB) {
-        showToast('Database not available', 'error')
+      // Get draft from localStorage using helper function
+      const draftInvoice = getDraftById(draftInvoiceId)
+
+      if (!draftInvoice) {
+        showToast('Draft invoice not found', 'error')
         return
       }
-
-      const draftInvoice = await localDB.get(draftInvoiceId) as any
       
       if (draftInvoice.type === 'POSInvoice' && draftInvoice.status === 'Draft') {
         // Pre-populate order items from draft - get full product details
@@ -158,26 +159,43 @@ const OrderPage = () => {
     }
   }, [])
   
-  // Check database initialization status
+    // Check database initialization status and initialize POS store
   useEffect(() => {
-    // Check if database was initialized during login
-    const dbInitialized = localStorage.getItem('dbInitialized')
-    const posProfileName = localStorage.getItem('posProfileName')
-    
-    if (dbInitialized === 'true') {
-      setSyncStatus('synced')
-      console.log('✅ Database already initialized during login')
-      if (posProfileName) {
-        console.log('✅ POS Profile loaded:', posProfileName)
+    const initializeOrderPage = async () => {
+      // Check if database was initialized during login
+      const dbInitialized = localStorage.getItem('dbInitialized')
+      const posProfileName = localStorage.getItem('posProfileName')
+      
+      if (dbInitialized === 'true') {
+        setSyncStatus('synced')
+        console.log('✅ Database already initialized during login')
+        if (posProfileName) {
+          console.log('✅ POS Profile loaded:', posProfileName)
+        }
+        
+        // Initialize POS store from already-loaded database
+        if (!posDataLoaded) {
+          console.log('🏪 Initializing POS store from existing database...')
+          try {
+            await initializePOSData()
+            console.log('✅ POS store initialized successfully from database')
+          } catch (error) {
+            console.error('❌ Failed to initialize POS store:', error)
+          }
+        } else {
+          console.log('✅ POS store already loaded')
+        }
+      } else {
+        console.log('⚠️ Database not initialized during login, working in offline mode')
+        setSyncStatus('error')
       }
-    } else {
-      console.log('⚠️ Database not initialized during login, working in offline mode')
-      setSyncStatus('error')
+
+      // Update POS permissions regardless of DB status
+      updatePOSPermissions()
     }
 
-    // Update POS permissions regardless of DB status
-    updatePOSPermissions()
-  }, []);
+    initializeOrderPage()
+  }, [posDataLoaded, initializePOSData]);
 
 
 
@@ -364,6 +382,63 @@ const OrderPage = () => {
     setTimeout(() => setToast(null), 3000) // Auto-hide after 3 seconds
   }
 
+  // Draft management helper functions
+  const getAllDrafts = (): any[] => {
+    try {
+      return JSON.parse(localStorage.getItem('draftInvoices') || '[]')
+    } catch (error) {
+      console.error('Failed to get drafts from localStorage:', error)
+      return []
+    }
+  }
+
+  const saveDraftToLocalStorage = (draftData: any): boolean => {
+    try {
+      const existingDrafts = getAllDrafts()
+      const draftIndex = existingDrafts.findIndex((draft: any) => draft._id === draftData._id)
+      
+      if (draftIndex !== -1) {
+        // Update existing draft
+        existingDrafts[draftIndex] = draftData
+        console.log('Updated existing draft in localStorage')
+      } else {
+        // Add new draft
+        existingDrafts.push(draftData)
+        console.log('Added new draft to localStorage')
+      }
+      
+      localStorage.setItem('draftInvoices', JSON.stringify(existingDrafts))
+      console.log(`Draft saved successfully. Total drafts: ${existingDrafts.length}`)
+      return true
+    } catch (error) {
+      console.error('Failed to save draft to localStorage:', error)
+      return false
+    }
+  }
+
+  const removeDraftFromLocalStorage = (draftId: string): boolean => {
+    try {
+      const existingDrafts = getAllDrafts()
+      const updatedDrafts = existingDrafts.filter((draft: any) => draft._id !== draftId)
+      localStorage.setItem('draftInvoices', JSON.stringify(updatedDrafts))
+      console.log(`Draft ${draftId} removed from localStorage`)
+      return true
+    } catch (error) {
+      console.error('Failed to remove draft from localStorage:', error)
+      return false
+    }
+  }
+
+  const getDraftById = (draftId: string): any | null => {
+    try {
+      const existingDrafts = getAllDrafts()
+      return existingDrafts.find((draft: any) => draft._id === draftId) || null
+    } catch (error) {
+      console.error('Failed to get draft by ID:', error)
+      return null
+    }
+  }
+
   const handlePrintOrder = async () => {
     const orderData = {
       items: orderItems.map(item => ({
@@ -531,31 +606,15 @@ const OrderPage = () => {
         AuditLogId: `Audit::StoreA::POS1::AUDIT-${Date.now().toString().slice(-6)}`
       }
 
-      // Save draft to local database
+      // Save draft to localStorage (not localDB)
       try {
-        console.log('Saving draft to local database...')
+        console.log('Saving draft to localStorage...')
         
-        if (!localDB) {
-          throw new Error('Local database not available')
-        }
-
-        // Handle revision for existing drafts
-        if (isDraftContinuation && draftId && currentDraftId === draftId) {
-          try {
-            const existingDraft = await localDB.get(currentDraftId) as any
-            draftData._rev = existingDraft._rev
-            console.log('Updating existing draft with rev:', existingDraft._rev)
-          } catch (e) {
-            // Draft doesn't exist anymore, create new one
-            console.log('Existing draft not found, creating new one')
-          }
-        } else {
-          console.log('Creating brand new draft')
-        }
+        const saveSuccess = saveDraftToLocalStorage(draftData)
         
-        // Save to local DB
-        await localDB.put(draftData)
-        console.log('Draft saved to local database successfully')
+        if (!saveSuccess) {
+          throw new Error('Failed to save draft to localStorage')
+        }
         
         setSyncStatus('synced')
         showToast('Draft saved successfully!', 'success')
@@ -734,6 +793,16 @@ const OrderPage = () => {
         
         setSyncStatus('synced')
         showToast('Order submitted successfully!', 'success')
+        
+        // If this was a draft continuation, remove the draft from localStorage
+        if (isDraftContinuation && draftId) {
+          const removeSuccess = removeDraftFromLocalStorage(draftId)
+          if (removeSuccess) {
+            console.log(`✅ Draft ${draftId} removed from localStorage after conversion to final invoice`)
+          } else {
+            console.warn(`⚠️ Failed to remove draft ${draftId} from localStorage`)
+          }
+        }
         
         // Clear the order after successful submission
         setOrderItems([])

@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Store, Monitor, Settings, LogIn, User } from 'lucide-react'
+import { posApi, handleApiError, sessionUtils, type ApiError } from '@/lib/api-service'
+import { localDB } from '@/lib/pouchdb'
 
 const SelectPage = () => {
   const [selectedPOSProfile, setSelectedPOSProfile] = useState('')
@@ -11,43 +13,75 @@ const SelectPage = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [username, setUsername] = useState('')
+  const [posProfiles, setPosProfiles] = useState<Array<{id: string, name: string}>>([])
+  const [loadingProfiles, setLoadingProfiles] = useState(true)
   const router = useRouter()
 
   // Check if user is logged in
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn')
     const storedUsername = localStorage.getItem('username')
+    const fullName = localStorage.getItem('fullName')
     
     if (!isLoggedIn) {
       router.push('/login')
       return
     }
     
-    if (storedUsername) {
+    // Use full name if available, otherwise fall back to username
+    if (fullName) {
+      setUsername(fullName)
+    } else if (storedUsername) {
       setUsername(storedUsername)
     }
   }, [router])
 
-  // Mock data - replace with API calls later
-  const posProfiles = [
-    { id: 'pos-profile-1', name: 'POS Profile 1' },
-    { id: 'pos-profile-2', name: 'POS Profile 2' },
-    { id: 'pos-profile-3', name: 'Restaurant Profile' },
-    { id: 'pos-profile-4', name: 'Retail Profile' }
-  ]
+  // Load POS Profiles on component mount
+  useEffect(() => {
+    loadPOSProfiles()
+  }, [])
 
+  // Load POS Profiles from localDB
+  const loadPOSProfiles = async () => {
+    if (!localDB) {
+      console.error('LocalDB not available for loading POS Profiles')
+      setLoadingProfiles(false)
+      return
+    }
+
+    try {
+      console.log('🏪 Loading POS Profiles from localDB...')
+      
+      // Query for documents with type 'POSProfile'
+      const result = await localDB.find({
+        selector: {
+          type: 'POSProfile'
+        }
+      })
+
+      const profiles = result.docs.map((doc: any) => ({
+        id: doc._id,
+        name: doc.profile_name || doc.name || doc._id || 'Unknown Profile'
+      }))
+
+      console.log(`✅ Loaded ${profiles.length} POS Profiles:`, profiles)
+      setPosProfiles(profiles)
+      
+    } catch (error) {
+      console.error('❌ Error loading POS Profiles:', error)
+      setPosProfiles([])
+    } finally {
+      setLoadingProfiles(false)
+    }
+  }
+
+  // Static options for Store and Terminal
   const stores = [
-    { id: 'store-a', name: 'Store A - Main Branch' },
-    { id: 'store-b', name: 'Store B - Mall Branch' },
-    { id: 'store-c', name: 'Store C - Downtown' },
-    { id: 'store-d', name: 'Store D - Airport' }
+    { id: 'store-1', name: 'Store 1' }
   ]
 
   const terminals = [
-    { id: 'terminal-1', name: 'Terminal 1' },
-    { id: 'terminal-2', name: 'Terminal 2' },
-    { id: 'terminal-3', name: 'Terminal 3' },
-    { id: 'terminal-4', name: 'Terminal 4' }
+    { id: 'terminal-1', name: 'POS Terminal 1' }
   ]
 
   const handleOpenShift = async (e: React.FormEvent) => {
@@ -55,7 +89,11 @@ const SelectPage = () => {
     
     // Basic validation
     if (!selectedPOSProfile) {
-      setError('Please select a POS Profile')
+      if (posProfiles.length === 0) {
+        setError('No POS Profiles found in database. Please sync data first.')
+      } else {
+        setError('Please select a POS Profile')
+      }
       return
     }
     
@@ -73,40 +111,77 @@ const SelectPage = () => {
     setError('')
 
     try {
-      // TODO: Implement actual 'open shift API' call here
-      // const response = await fetch('/api/open-shift', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     username,
-      //     posProfile: selectedPOSProfile,
-      //     store: selectedStore,
-      //     terminal: selectedTerminal
-      //   })
-      // })
+      // Get current user info
+      const userInfo = sessionUtils.getCurrentUser()
       
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      if (!userInfo) {
+        setError('User session not found. Please login again.')
+        return
+      }
+
+      // Get selected profile name for display
+      const selectedProfile = posProfiles.find(p => p.id === selectedPOSProfile)
+      const selectedStoreName = stores.find(s => s.id === selectedStore)?.name || selectedStore
+      const selectedTerminalName = terminals.find(t => t.id === selectedTerminal)?.name || selectedTerminal
+
+      // Prepare POS Entry data
+      const shiftStartTime = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')
+      const posEntryData = {
+        pos_profile: selectedProfile?.name || selectedPOSProfile,
+        custom_pos_store: selectedStoreName,
+        period_start_date: shiftStartTime,
+        custom_pos_terminal: selectedTerminalName,
+        user: userInfo.name || userInfo.full_name,
+        company: "Great Eastern",
+        balance_details: [
+          {
+            mode_of_payment: "Cash",
+            opening_amount: 0
+          }
+        ]
+      }
+
+      console.log('🔄 Creating POS Entry with data:', posEntryData, userInfo.username, userInfo.name)
       
-      // For demo purposes, allow access
-      // Store session data
-      localStorage.setItem('posProfile', selectedPOSProfile)
-      localStorage.setItem('store', selectedStore)
-      localStorage.setItem('terminal', selectedTerminal)
-      localStorage.setItem('shiftOpen', 'true')
+      // Call the real API to create POS entry
+      const result = await posApi.createPOSEntry(posEntryData)
       
-      // Redirect to POS system
-      router.push('/order')
+      if (result.message) {
+        console.log('✅ POS Entry created successfully:', result.message)
+        
+        // Store the complete POS entry response
+        localStorage.setItem('posEntry', JSON.stringify(result.message))
+        localStorage.setItem('posEntryName', result.message.name)
+        localStorage.setItem('invoiceSeqNo', result.message.invoice_seq_no?.toString() || '1')
+        localStorage.setItem('shiftStartTime', shiftStartTime)
+        
+        // Store session data (keep existing for backward compatibility)
+        localStorage.setItem('posProfile', selectedPOSProfile)
+        localStorage.setItem('store', selectedStore)
+        localStorage.setItem('terminal', selectedTerminal)
+        localStorage.setItem('shiftOpen', 'true')
+        
+        console.log(`✅ Shift opened: ${result.message.name} for user: ${result.message.user}`)
+        
+        // Redirect to POS system
+        router.push('/order')
+      } else {
+        throw new Error('Invalid response from POS Entry API')
+      }
       
-    } catch (err) {
-      setError('Failed to open shift. Please try again.')
+    } catch (err: any) {
+      console.error('Failed to open shift:', err)
+      const errorMessage = handleApiError(err as ApiError)
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleLogout = () => {
-    localStorage.clear()
+    // Use centralized session clearing
+    sessionUtils.clearSession()
+    console.log('🔒 User logged out and session cleared')
     router.push('/login')
   }
 
@@ -142,14 +217,23 @@ const SelectPage = () => {
                 required
                 value={selectedPOSProfile}
                 onChange={(e) => setSelectedPOSProfile(e.target.value)}
-                className="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 sm:text-sm"
+                disabled={loadingProfiles}
+                className="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 sm:text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
-                <option value="">Select POS Profile...</option>
-                {posProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
+                {loadingProfiles ? (
+                  <option value="">Loading POS Profiles...</option>
+                ) : posProfiles.length === 0 ? (
+                  <option value="">No POS Profiles found</option>
+                ) : (
+                  <>
+                    <option value="">Select POS Profile...</option>
+                    {posProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
             </div>
 
@@ -248,22 +332,6 @@ const SelectPage = () => {
             </button>
           </div>
         </form>
-
-        {/* Info Box */}
-        {/* <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <div className="flex items-start">
-            <svg className="w-5 h-5 text-yellow-600 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <p className="text-yellow-800 text-sm font-medium mb-1">Shift Management</p>
-              <p className="text-yellow-700 text-xs">
-                The system will check if a shift is already open for the selected configuration. 
-                API integration can be added later.
-              </p>
-            </div>
-          </div>
-        </div> */}
       </div>
     </div>
   )

@@ -59,53 +59,70 @@ const InvoicesPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
 
-  // Load invoices from PouchDB
+  // Load invoices from PouchDB and drafts from localStorage
   const loadInvoices = async () => {
     console.log('DEBUG: Starting to load invoices...')
-    
-    if (!localDB) {
-      console.log('DEBUG: LocalDB not available')
-      setError('Database not available')
-      setLoading(false)
-      return
-    }
 
     try {
-      console.log('DEBUG: LocalDB is available, checking documents...')
+      // Load submitted invoices from localDB
+      let submittedInvoices: POSInvoice[] = []
       
-      // Debug: Check all documents first
-      const allDocs = await localDB.allDocs({ include_docs: true })
-      console.log('DEBUG: Total documents in DB:', allDocs.rows.length)
-      
-      const allPOSInvoices = allDocs.rows
-        .map((row: any) => row.doc)
-        .filter((doc: any) => doc && doc.type === 'POSInvoice')
-      
-      console.log('DEBUG: All POSInvoice documents in DB:', allPOSInvoices.map(doc => ({
-        id: doc._id,
-        type: doc.type,
-        status: doc.status,
-        CreatedBy: doc.CreatedBy,
-        customer: doc.customer_id?.split('::').pop()
-      })))
-      
-      // Use the simple approach directly - skip the complex query for now
-      console.log('DEBUG: Using direct filtering approach')
-      const finalInvoices = allPOSInvoices.filter((doc: any) => 
-        doc && doc.type === 'POSInvoice' && doc.CreatedBy === 'POS_USER'
-      )
-      
-      console.log('DEBUG: Filtered invoices:', finalInvoices.map((doc: any) => ({
-        id: doc._id,
-        type: doc.type,
-        status: doc.status,
-        CreatedBy: doc.CreatedBy
-      })))
+      if (localDB) {
+        console.log('DEBUG: Loading submitted invoices from localDB...')
+        
+        const allDocs = await localDB.allDocs({ include_docs: true })
+        console.log('DEBUG: Total documents in DB:', allDocs.rows.length)
+        
+        const allPOSInvoices = allDocs.rows
+          .map((row: any) => row.doc)
+          .filter((doc: any) => doc && doc.type === 'POSInvoice')
+        
+        console.log('DEBUG: All POSInvoice documents in DB:', allPOSInvoices.map(doc => ({
+          id: doc._id,
+          type: doc.type,
+          status: doc.status,
+          CreatedBy: doc.CreatedBy,
+          customer: doc.customer_id?.split('::').pop()
+        })))
+        
+        // Filter for submitted invoices only (not drafts)
+        submittedInvoices = allPOSInvoices.filter((doc: any) => 
+          doc && doc.type === 'POSInvoice' && doc.CreatedBy === 'POS_USER' && doc.status !== 'Draft'
+        ) as POSInvoice[]
+        
+        console.log('DEBUG: Submitted invoices from localDB:', submittedInvoices.length)
+      } else {
+        console.log('DEBUG: LocalDB not available, skipping database invoices')
+      }
 
-      const invoiceData = finalInvoices as POSInvoice[]
-      console.log('DEBUG: Final invoices being displayed:', invoiceData.length)
-      invoiceData.sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
-      setInvoices(invoiceData)
+      // Load draft invoices from localStorage
+      console.log('DEBUG: Loading draft invoices from localStorage...')
+      let draftInvoices: POSInvoice[] = []
+      
+      try {
+        const draftsJson = localStorage.getItem('draftInvoices')
+        if (draftsJson) {
+          draftInvoices = JSON.parse(draftsJson) as POSInvoice[]
+          console.log('DEBUG: Draft invoices from localStorage:', draftInvoices.length)
+        } else {
+          console.log('DEBUG: No draft invoices found in localStorage')
+        }
+      } catch (storageError) {
+        console.error('DEBUG: Error loading drafts from localStorage:', storageError)
+        // Continue without drafts if storage fails
+      }
+
+      // Combine submitted invoices from DB and draft invoices from localStorage
+      const combinedInvoices = [...submittedInvoices, ...draftInvoices]
+      console.log('DEBUG: Combined invoices total:', combinedInvoices.length, {
+        submitted: submittedInvoices.length,
+        drafts: draftInvoices.length
+      })
+
+      // Sort by creation date (most recent first)
+      combinedInvoices.sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
+      
+      setInvoices(combinedInvoices)
       setError(null)
       
     } catch (err) {

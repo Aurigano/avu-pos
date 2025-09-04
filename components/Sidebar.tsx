@@ -3,6 +3,7 @@
 import { ShoppingCart, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import LogoutButton from './LogoutButton'
 
 const Sidebar = () => {
   const pathname = usePathname()
@@ -49,8 +50,8 @@ const Sidebar = () => {
             })}
           </div>
           
-          {/* Version */}
-          <div className="text-xs text-gray-400">V 1.0</div>
+          {/* Logout */}
+          <LogoutButton variant="mobile" />
         </div>
       </div>
 
@@ -72,10 +73,9 @@ const Sidebar = () => {
               </Link>
             )
           })}
-        </div>
-        
-        <div className="p-4 text-xs text-gray-400">
-          V 1.0
+          
+          {/* Logout Button */}
+          <LogoutButton variant="desktop" />
         </div>
       </div>
     </>
