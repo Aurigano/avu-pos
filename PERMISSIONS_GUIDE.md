@@ -5,14 +5,14 @@ The POS system now supports permission-based controls based on the user's POS Pr
 
 ## 📋 Current Permissions
 
-### 1. **Customer Discount Permission** (`enable_customer_discount`)
+### 1. **Customer Discount Permission** (`allow_discount_change`)
 - **Source**: Real field from POSProfile document in database
 - **Controls**: Whether user can modify discount amounts
 - **UI Behavior**:
   - ✅ **Enabled**: Shows editable discount input field
   - ❌ **Disabled**: Shows grayed-out, disabled input with "Not Permitted" message
 
-### 2. **Rate Change Permission** (`enable_rate_change`) 
+### 2. **Rate Change Permission** (`allow_rate_change`) 
 - **Source**: ⚠️ **DUMMY FIELD** - Currently defaults to `true` 
 - **TODO**: Replace with real field when backend adds it to POSProfile
 - **Controls**: Whether user can modify item rates/prices in the billing table  
@@ -31,8 +31,8 @@ const targetPOSProfile = posProfiles.find(profile =>
 
 // 2. Permissions extracted and saved to localStorage
 const permissions = {
-  enableCustomerDiscount: profile.enable_customer_discount,
-  enableRateChange: profile.enable_rate_change ?? true,  // Dummy default
+  enableCustomerDiscount: profile.allow_discount_change,
+enableRateChange: profile.allow_rate_change,
   // ... other permissions
 }
 ```
@@ -60,8 +60,8 @@ const permissions = {
 ```json
 // POSProfile document in database:
 {
-  "enable_customer_discount": true,
-  "enable_rate_change": true  // TODO: Add this field to real profile
+  "allow_discount_change": true,
+  "allow_rate_change": true
 }
 ```
 **Expected**: Both discount and rates are editable
@@ -70,32 +70,29 @@ const permissions = {
 ```json
 // POSProfile document:
 {
-  "enable_customer_discount": false,
-  "enable_rate_change": true
+  "allow_discount_change": false,
+  "allow_rate_change": true
 }
 ```
 **Expected**: Rates editable, discount disabled and grayed out
 
 ### Test Scenario 3: Disable Rate Changes (Future)
 ```json
-// POSProfile document (when field is added):
+// POSProfile document:
 {
-  "enable_customer_discount": true,
-  "enable_rate_change": false
+  "allow_discount_change": true,
+  "allow_rate_change": false
 }
 ```
 **Expected**: Discount editable, rates read-only
 
 ## 🔮 Future Integration
 
-### When Backend Adds `enable_rate_change`
-1. **Remove dummy logic** from `/lib/pos-profile-manager.ts`:
+### Backend Integration Complete
+1. **Updated implementation** in `/lib/pos-profile-manager.ts`:
    ```javascript
-   // Remove this line:
-   enableRateChange: currentPOSProfile.enable_rate_change ?? true,
-   
-   // Replace with:
-   enableRateChange: currentPOSProfile.enable_rate_change,
+   // Now uses real database field:
+   enableRateChange: currentPOSProfile.allow_rate_change,
    ```
 
 2. **Remove UI indicator** from `/components/OrderItem.tsx`:
@@ -143,10 +140,11 @@ const permissions = {
 ## 🏷️ Permission Categories
 
 ### Current Permissions:
-- `enable_customer_discount` - Financial controls
+- `allow_discount_change` - Financial controls
+- `allow_rate_change` - Rate modification controls
 - `enable_pos_offers` - Promotional controls  
 - `allow_negative_stock` - Inventory controls
-- `enable_rate_change` - Pricing controls (dummy)
+- `allow_rate_change` - Pricing controls
 
 ### Future Permissions:
 - `enable_refunds` - Return/refund operations
@@ -161,22 +159,22 @@ const permissions = {
 ```javascript
 // Cashier Profile
 {
-  "enable_customer_discount": false,
-  "enable_rate_change": false,
+  "allow_discount_change": false,
+  "allow_rate_change": false,
   "enable_refunds": false
 }
 
 // Manager Profile  
 {
-  "enable_customer_discount": true,
-  "enable_rate_change": true,
+  "allow_discount_change": true,
+  "allow_rate_change": true,
   "enable_refunds": true
 }
 
 // Admin Profile
 {
-  "enable_customer_discount": true,
-  "enable_rate_change": true,
+  "allow_discount_change": true,
+  "allow_rate_change": true,
   "enable_refunds": true,
   "enable_user_management": true
 }

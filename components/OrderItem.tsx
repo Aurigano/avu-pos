@@ -75,7 +75,7 @@ const OrderItem = ({ item, onRemove, onQuantityChange, onRateChange, enableRateC
             {item.price.toFixed(2)}
           </span>
         )}
-        {/* // TODO: Remove this UI indicator when backend adds enable_rate_change to POSProfile */}
+                        {/* Rate change permission now controlled by allow_rate_change field */}
         {/* {enableRateChange && (
           <div className="text-xs text-blue-500 mt-1">✏️ Editable</div>
         )} */}

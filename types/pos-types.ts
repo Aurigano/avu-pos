@@ -8,11 +8,9 @@ export interface POSProfile {
   currency: string
   default_warehouse_id: string
   price_list_id: string
-  enable_customer_discount: boolean
+  allow_discount_change: boolean
+  allow_rate_change: boolean
   enable_pos_offers: boolean
-  // TODO: This is a dummy field for development - replace with actual POSProfile field from database
-  // when the backend adds this permission to the POSProfile document
-  enable_rate_change?: boolean  // Optional for backward compatibility with existing profiles
   payment_methods: Array<{
     mode_of_payment_id: string
     default: boolean

@@ -17,7 +17,7 @@ const SelectPage = () => {
   const [loadingProfiles, setLoadingProfiles] = useState(true)
   const router = useRouter()
 
-  // Check if user is logged in
+  // Check if user is logged in and load persisted selections
   useEffect(() => {
     const isLoggedIn = localStorage.getItem('isLoggedIn')
     const storedUsername = localStorage.getItem('username')
@@ -33,6 +33,20 @@ const SelectPage = () => {
       setUsername(fullName)
     } else if (storedUsername) {
       setUsername(storedUsername)
+    }
+
+    // Load persisted store and terminal selections (persist across logouts)
+    const savedStore = localStorage.getItem('store')
+    const savedTerminal = localStorage.getItem('terminal')
+    
+    if (savedStore) {
+      setSelectedStore(savedStore)
+      console.log('🏪 Restored store selection:', savedStore)
+    }
+    
+    if (savedTerminal) {
+      setSelectedTerminal(savedTerminal)
+      console.log('💻 Restored terminal selection:', savedTerminal)
     }
   }, [router])
 

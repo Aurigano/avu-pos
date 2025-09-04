@@ -77,12 +77,10 @@ export const getCurrentPOSProfile = () => {
     profileName: currentProfileName,
     isLoaded,
     permissions: currentPOSProfile ? {
-      enableCustomerDiscount: currentPOSProfile.enable_customer_discount,
+      enableCustomerDiscount: currentPOSProfile.allow_discount_change,
+      enableRateChange: currentPOSProfile.allow_rate_change,
       enablePOSOffers: currentPOSProfile.enable_pos_offers,
       allowNegativeStock: currentPOSProfile.allow_negative_stock,
-      // TODO: Remove this dummy logic when backend adds enable_rate_change to POSProfile
-      // For now, default to true if not present in database
-      enableRateChange: currentPOSProfile.enable_rate_change ?? true,  // Dummy: defaults to true
       paymentMethods: currentPOSProfile.payment_methods
     } : null
   }

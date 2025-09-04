@@ -378,6 +378,7 @@ export const sessionUtils = {
 
   /**
    * Clear session data
+   * Note: 'store' and 'terminal' are intentionally preserved across logouts
    */
   clearSession: (): void => {
     localStorage.removeItem('isLoggedIn')
@@ -388,8 +389,7 @@ export const sessionUtils = {
     localStorage.removeItem('fullName')
     localStorage.removeItem('homePage')
     localStorage.removeItem('posProfile')
-    localStorage.removeItem('store')
-    localStorage.removeItem('terminal')
+    // Preserve 'store' and 'terminal' - they persist across user sessions
     localStorage.removeItem('shiftOpen')
     localStorage.removeItem('dbInitialized')
     localStorage.removeItem('posProfileName')
