@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar, User, TrendingUp, CreditCard, Eye, Clock, Printer, Package, FileText } from 'lucide-react'
+import { Calendar, User, TrendingUp, CreditCard, Eye, Clock, Printer, Package, FileText, Edit3 } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import { localDB, remoteDB } from '@/lib/pouchdb'
 import { printInvoiceReceipt } from '@/lib/print-utils'
@@ -61,27 +61,58 @@ const InvoicesPage = () => {
 
   // Load invoices from PouchDB
   const loadInvoices = async () => {
+    console.log('DEBUG: Starting to load invoices...')
+    
     if (!localDB) {
+      console.log('DEBUG: LocalDB not available')
       setError('Database not available')
       setLoading(false)
       return
     }
 
     try {
-      const result = await localDB.find({
-        selector: {
-          type: 'POSInvoice',
-          CreatedBy: 'POS_USER'
-        }
-      })
+      console.log('DEBUG: LocalDB is available, checking documents...')
+      
+      // Debug: Check all documents first
+      const allDocs = await localDB.allDocs({ include_docs: true })
+      console.log('DEBUG: Total documents in DB:', allDocs.rows.length)
+      
+      const allPOSInvoices = allDocs.rows
+        .map((row: any) => row.doc)
+        .filter((doc: any) => doc && doc.type === 'POSInvoice')
+      
+      console.log('DEBUG: All POSInvoice documents in DB:', allPOSInvoices.map(doc => ({
+        id: doc._id,
+        type: doc.type,
+        status: doc.status,
+        CreatedBy: doc.CreatedBy,
+        customer: doc.customer_id?.split('::').pop()
+      })))
+      
+      // Use the simple approach directly - skip the complex query for now
+      console.log('DEBUG: Using direct filtering approach')
+      const finalInvoices = allPOSInvoices.filter((doc: any) => 
+        doc && doc.type === 'POSInvoice' && doc.CreatedBy === 'POS_USER'
+      )
+      
+      console.log('DEBUG: Filtered invoices:', finalInvoices.map((doc: any) => ({
+        id: doc._id,
+        type: doc.type,
+        status: doc.status,
+        CreatedBy: doc.CreatedBy
+      })))
 
-      const invoiceData = result.docs as POSInvoice[]
+      const invoiceData = finalInvoices as POSInvoice[]
+      console.log('DEBUG: Final invoices being displayed:', invoiceData.length)
       invoiceData.sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
       setInvoices(invoiceData)
       setError(null)
+      
     } catch (err) {
       console.error('Error loading invoices:', err)
-      setError('Failed to load invoices')
+      setError(`Failed to load invoices: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -109,14 +140,26 @@ const InvoicesPage = () => {
     return `${parseFloat(amount.toFixed(2))}`
   }
 
+  // Function to continue a draft invoice
+  const handleContinueDraft = (invoiceId: string) => {
+    // Navigate to orders page with draft ID parameter
+    window.location.href = `/order?continueDraft=${invoiceId}`
+  }
+
 
 
   const InvoiceCard = ({ invoice }: { invoice: POSInvoice }) => (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-shadow cursor-pointer"
-         onClick={() => setSelectedInvoice(invoice)}>
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-shadow"
+         onClick={invoice.status === 'Draft' ? undefined : () => setSelectedInvoice(invoice)}>
       <div className="flex items-start justify-between mb-3 sm:mb-4">
         <div className="min-w-0 flex-1 mr-4">
-          <h3 className="text-base sm:text-lg font-semibold text-gray-800 truncate">{invoice.erpnext_id || invoice._id}</h3>
+          <h3 className="text-base sm:text-lg font-semibold text-gray-800 truncate">
+            {invoice.status === 'Draft' ? (
+              <span className="text-gray-600 italic">Draft Invoice</span>
+            ) : (
+              invoice.erpnext_id || invoice._id
+            )}
+          </h3>
           <div className="flex items-center text-gray-600 mt-1">
             <User size={16} className="mr-1 flex-shrink-0" />
             <span className="text-xs sm:text-sm truncate">{invoice.customer_id?.split('::').pop() || 'Unknown Customer'}</span>
@@ -127,7 +170,8 @@ const InvoicesPage = () => {
             {formatCurrency(invoice.total_amount)}
           </div>
           <div className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-            invoice.status === 'Submitted' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+            invoice.status === 'Submitted' ? 'bg-green-100 text-green-800' : 
+            invoice.status === 'Draft' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
           }`}>
             {invoice.status}
           </div>
@@ -155,11 +199,33 @@ const InvoicesPage = () => {
           {invoice.tip_amount && invoice.tip_amount > 0 && (
             <span className="text-gray-600">Tip: {formatCurrency(invoice.tip_amount)}</span>
           )}
-          <button className="text-blue-600 hover:text-blue-800 flex items-center flex-shrink-0">
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            {invoice.status === 'Draft' ? (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleContinueDraft(invoice._id)
+                }}
+                className="text-blue-600 hover:text-blue-800 flex items-center"
+              >
+                <Edit3 size={16} className="mr-1" />
+                <span className="hidden sm:inline">Continue Draft</span>
+                <span className="sm:hidden">Continue</span>
+              </button>
+            ) : (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelectedInvoice(invoice)
+                }}
+                className="text-blue-600 hover:text-blue-800 flex items-center"
+              >
             <Eye size={16} className="mr-1" />
             <span className="hidden sm:inline">View Details</span>
             <span className="sm:hidden">View</span>
           </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -171,8 +237,23 @@ const InvoicesPage = () => {
         <div className="bg-white rounded-lg max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
           <div className="p-4 sm:p-6 border-b border-gray-200">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-black">Invoice Details</h2>
+              <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-black">
+                {invoice.status === 'Draft' ? 'Draft Invoice Details' : 'Invoice Details'}
+              </h2>
               <div className="flex items-center space-x-2">
+                {invoice.status === 'Draft' ? (
+                  <button
+                    onClick={() => {
+                      setSelectedInvoice(null)
+                      handleContinueDraft(invoice._id)
+                    }}
+                    className="flex items-center px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
+                  >
+                    <Edit3 size={16} className="mr-1 sm:mr-2" />
+                    <span className="hidden sm:inline">Continue Draft</span>
+                    <span className="sm:hidden">Continue</span>
+                  </button>
+                ) : (
                 <button
                   onClick={() => printInvoiceReceipt(invoice)}
                   className="flex items-center px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base"
@@ -181,6 +262,7 @@ const InvoicesPage = () => {
                   <span className="hidden sm:inline">Print Receipt</span>
                   <span className="sm:hidden">Print</span>
                 </button>
+                )}
                 <button
                   onClick={() => setSelectedInvoice(null)}
                   className="text-gray-500 hover:text-gray-700 text-xl sm:text-2xl p-1"
@@ -197,11 +279,16 @@ const InvoicesPage = () => {
               <div>
                 <h3 className="text-base sm:text-lg font-semibold text-black mb-2">Invoice Information</h3>
                 <div className="space-y-1 sm:space-y-2 text-sm">
+                  {invoice.status !== 'Draft' ? (
                   <div><span className="font-medium text-gray-700">Invoice ID:</span> <span className="text-black break-all">{invoice.erpnext_id || invoice._id}</span></div>
+                  ) : (
+                    <div><span className="font-medium text-gray-700">Draft ID:</span> <span className="text-black break-all">{invoice._id}</span></div>
+                  )}
                   <div><span className="font-medium text-gray-700">Customer:</span> <span className="text-black break-words">{invoice.customer_id?.split('::').pop() || 'Unknown Customer'}</span></div>
                   <div><span className="font-medium text-gray-700">Status:</span> 
                     <span className={`ml-2 inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                      invoice.status === 'Submitted' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                      invoice.status === 'Submitted' ? 'bg-green-100 text-green-800' : 
+                      invoice.status === 'Draft' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
                     }`}>
                       {invoice.status}
                     </span>
@@ -336,13 +423,25 @@ const InvoicesPage = () => {
         ) : (
           <>
             {/* Summary Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-4 sm:mb-6">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 lg:gap-6 mb-4 sm:mb-6">
               <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 lg:p-6">
                 <div className="flex items-center">
                   <FileText className="text-blue-500 mr-2 lg:mr-3" size={24} />
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Total Invoices</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">{invoices.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-3 sm:p-4 lg:p-6">
+                <div className="flex items-center">
+                  <FileText className="text-yellow-500 mr-2 lg:mr-3" size={24} />
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm text-gray-600">Draft Invoices</p>
+                    <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
+                      {invoices.filter(inv => inv.status === 'Draft').length}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -353,7 +452,7 @@ const InvoicesPage = () => {
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Total Revenue</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
-                      {formatCurrency(invoices.reduce((sum, inv) => sum + inv.total_amount, 0))}
+                      {formatCurrency(invoices.filter(inv => inv.status === 'Submitted').reduce((sum, inv) => sum + inv.total_amount, 0))}
                     </p>
                   </div>
                 </div>

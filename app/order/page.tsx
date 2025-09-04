@@ -7,9 +7,10 @@ import OrderItem from '../../components/OrderItem'
 import SearchBar from '../../components/SearchBar'
 import { useHydration } from '../../hooks/useHydration'
 import { localDB, remoteDB } from '@/lib/pouchdb'
-import serviceWorkerManager from '@/lib/service-worker-manager'
 import { usePOSStore } from '@/stores/pos-store'
 import { printOrderReceipt } from '@/lib/print-utils'
+import { getCurrentPOSProfile } from '@/lib/pos-profile-manager'
+import { databaseManager } from '@/lib/database-manager'
 
 interface OrderItemType {
   id: string
@@ -33,188 +34,152 @@ const OrderPage = () => {
   const [selectedCustomer, setSelectedCustomer] = useState<string>('')
   const mounted = useHydration()
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
-  const [serviceWorkerReady, setServiceWorkerReady] = useState(false)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [resetTrigger, setResetTrigger] = useState(0)
+  const [isDraftContinuation, setIsDraftContinuation] = useState(false)
+  const [draftId, setDraftId] = useState<string | null>(null)
+  
+  // POS Profile Permissions
+  const [posPermissions, setPosPermissions] = useState<{
+    enableCustomerDiscount: boolean
+    enableRateChange: boolean
+    enablePOSOffers: boolean
+    allowNegativeStock: boolean
+  } | null>(null)
   
   // POS Store
-  const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError } = usePOSStore()
+  const { initializePOSData, getItemPrice, isLoaded: posDataLoaded, loadError: posLoadError, currentPOSProfile } = usePOSStore()
 
-  // Test database connection
-  const testDatabaseConnection = async () => {
-    console.log('Testing database connection...')
-    
+  // Update permissions when POS profile changes
+  const updatePOSPermissions = () => {
+    const currentProfile = getCurrentPOSProfile()
+    if (currentProfile.permissions) {
+      setPosPermissions({
+        enableCustomerDiscount: currentProfile.permissions.enableCustomerDiscount,
+        enableRateChange: currentProfile.permissions.enableRateChange,
+        enablePOSOffers: currentProfile.permissions.enablePOSOffers,
+        allowNegativeStock: currentProfile.permissions.allowNegativeStock
+      })
+      console.log('📋 POS Permissions updated:', currentProfile.permissions)
+    }
+  }
+
+  // Simple sync function for order operations only
+  const performSync = async (direction: 'pull' | 'push' | 'both' = 'both') => {
+    return databaseManager.performSync(direction)
+  }
+  
+  // Function to continue from a draft invoice
+  const continueDraftInvoice = async (draftInvoiceId: string) => {
     try {
       if (!localDB) {
-        console.error('Local DB not available')
-        return false
-      }
-      
-      if (!remoteDB) {
-        console.error('Remote DB not available')
-        return false
-      }
-      
-      // Test local DB
-      const localInfo = await localDB.info()
-      console.log('Local DB info:', localInfo)
-      
-      // Test remote DB
-      const remoteInfo = await remoteDB.info()
-      console.log('Remote DB info:', remoteInfo)
-      
-      console.log('Database connection test successful')
-      return true
-    } catch (error) {
-      console.error('Database connection test failed:', error)
-      return false
-    }
-  }
-  
-  // One-time sync function
-  const performSync = async (direction: 'pull' | 'push' | 'both' = 'both') => {
-    setSyncStatus('syncing')
-    
-    try {
-      if (!localDB || !remoteDB) {
-        throw new Error('Database not available')
-      }
-
-      console.log(`Starting ${direction} sync...`)
-
-      if (direction === 'pull' || direction === 'both') {
-        // Pull from remote to local
-        console.log('Pulling data from remote database...')
-        const pullResult = await localDB.replicate.from(remoteDB, {
-          timeout: 15000, // 15 second timeout
-          retry: false    // Don't retry automatically to avoid hanging
-        })
-        console.log('Pull sync completed:', pullResult.docs_read, 'docs received')
-      }
-      
-      if (direction === 'push' || direction === 'both') {
-        // Push from local to remote
-        console.log('Pushing data to remote database...')
-        const pushResult = await localDB.sync(remoteDB, {
-          timeout: 15000, // 15 second timeout
-          retry: false    // Don't retry automatically to avoid hanging
-        })
-        console.log('Push sync completed:', pushResult)
-        // console.log('Push sync completed:', pushResult.docs_written, 'docs sent')
-      }
-      
-      setSyncStatus('synced')
-      console.log(`${direction} sync completed successfully`)
-    } catch (error: any) {
-      console.error('Sync failed:', error.message || error)
-      setSyncStatus('error')
-      
-      // Log specific error types
-      if (error.status === 401 || error.status === 403) {
-        console.log('Authentication error - check credentials')
-      } else if (error.status === 404) {
-        console.log('Database not found - check URL')
-      } else if (error.message && error.message.includes('CORS')) {
-        console.log('CORS error - check server configuration')
-      } else if (error.code === 'ENOTFOUND' || error.message?.includes('fetch')) {
-        console.log('Network error - check internet connection')
-      } else {
-        console.log('Unknown sync error:', error)
-      }
-      
-      throw error // Re-throw to let caller handle
-    }
-  }
-  
-  // Initialize and perform initial sync
-  useEffect(() => {
-    const initializeApp = async () => {
-      console.log('Initializing app and performing initial sync...')
-      
-      // Test database connection first
-      const connectionOk = await testDatabaseConnection()
-      if (!connectionOk) {
-        console.log('Database connection failed, working offline')
-        setSyncStatus('error')
+        showToast('Database not available', 'error')
         return
       }
+
+      const draftInvoice = await localDB.get(draftInvoiceId) as any
       
-      // Always try direct sync first (more reliable)
-      try {
-        console.log('Attempting direct database sync...')
-        await performSync('pull')
-        console.log('Direct sync completed successfully')
-      } catch (directSyncError) {
-        console.log('Direct sync failed, trying service worker...', directSyncError)
+      if (draftInvoice.type === 'POSInvoice' && draftInvoice.status === 'Draft') {
+        // Pre-populate order items from draft - get full product details
+        const draftItems: OrderItemType[] = []
         
-        // Fallback to service worker if available
-        try {
-          const isReady = await serviceWorkerManager.initialize()
-          setServiceWorkerReady(isReady)
-          
-          if (isReady) {
-            console.log('Service Worker ready, performing sync...')
-            setSyncStatus('syncing')
-            await serviceWorkerManager.performSync('pull')
-            setSyncStatus('synced')
-            console.log('Service Worker sync completed')
-          } else {
-            console.log('Service Worker not available, working offline')
-            setSyncStatus('error')
+        for (const item of draftInvoice.items) {
+          try {
+            console.log('Loading product for draft item:', item.item_id)
+            const product = await getProductById(item.item_id)
+            
+            // Get dynamic price from POS store (similar to handleAddItemFromSearch)
+            const priceResult = getItemPrice(product.item_code, product.item_code)
+            const itemPrice = priceResult.isValid ? priceResult.price : (Number(product.standard_selling_rate) || item.rate)
+            
+            const draftItem: OrderItemType = {
+              id: `${item.item_id}-${Date.now()}-${draftItems.length}`,
+              name: product.item_name || 'Unknown Item', // Use actual product name
+              category: product.item_group || 'General', // Use actual category
+              price: item.rate, // Keep the original draft price
+              quantity: item.qty,
+              subtotal: item.amount,
+              item_id: item.item_id,
+              uom: item.uom || product.default_uom || 'Unit', // Use product UOM if available
+              image: product.image || ''
+            }
+            
+            draftItems.push(draftItem)
+            console.log('Successfully loaded product:', product.item_name, 'for draft item')
+            
+          } catch (error) {
+            console.error('Failed to load product for draft item:', item.item_id, error)
+            
+            // Fallback: create item with limited info
+            const fallbackItem: OrderItemType = {
+              id: `${item.item_id}-${Date.now()}-${draftItems.length}`,
+              name: item.item_id?.split('::').pop() || 'Unknown Item',
+              category: 'General',
+              price: item.rate,
+              quantity: item.qty,
+              subtotal: item.amount,
+              item_id: item.item_id,
+              uom: item.uom || 'Unit'
+            }
+            
+            draftItems.push(fallbackItem)
+            console.warn('Using fallback item data for:', item.item_id)
           }
-        } catch (swError) {
-          console.log('Service Worker sync also failed, working offline:', swError)
-          setSyncStatus('error')
         }
+
+        console.log('DEBUG: Draft items with proper names:', draftItems)
+
+        setOrderItems(draftItems)
+        setSelectedCustomer(draftInvoice.customer_id?.split('::').pop() || '')
+        setSelectedPaymentMethod(draftInvoice.payment_method || 'Cash')
+        setCashReceived(draftInvoice.cash_received?.toString() || '0')
+        setSelectedDiscount(draftInvoice.discounts?.[0]?.discount_amount || 0)
+        setIsDraftContinuation(true)
+        setDraftId(draftInvoiceId)
+        
+        showToast('Draft invoice loaded successfully. Complete payment to generate invoice.', 'info')
       }
+    } catch (error) {
+      console.error('Error loading draft invoice:', error)
+      showToast('Failed to load draft invoice', 'error')
     }
+  }
+
+  // Check URL parameters for draft continuation
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const continueDraftId = urlParams.get('continueDraft')
     
-    // Only run on client side
-    if (typeof window !== 'undefined') {
-      initializeApp()
+    if (continueDraftId) {
+      continueDraftInvoice(continueDraftId)
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname)
     }
+  }, [])
+  
+  // Check database initialization status
+  useEffect(() => {
+    // Check if database was initialized during login
+    const dbInitialized = localStorage.getItem('dbInitialized')
+    const posProfileName = localStorage.getItem('posProfileName')
+    
+    if (dbInitialized === 'true') {
+      setSyncStatus('synced')
+      console.log('✅ Database already initialized during login')
+      if (posProfileName) {
+        console.log('✅ POS Profile loaded:', posProfileName)
+      }
+    } else {
+      console.log('⚠️ Database not initialized during login, working in offline mode')
+      setSyncStatus('error')
+    }
+
+    // Update POS permissions regardless of DB status
+    updatePOSPermissions()
   }, []);
 
-  // Load all data from local database and create indexes
-  useEffect(() => {
-    const loadAllData = async () => {
-      if (!localDB) return;
-      
-      try {
-        // Create necessary indexes
-        await localDB.createIndex({
-          index: {
-            fields: ['type', 'CreatedBy', 'creation_date']
-          }
-        })
-        
-        await localDB.createIndex({
-          index: {
-            fields: ['type', 'item_name']
-          }
-        })
 
-        const allDocs = await localDB.allDocs({ include_docs: true });
-        console.log('All local database documents:', allDocs.rows.map((row: any) => row.doc));
-        
-        // Initialize POS data (POSProfile and ItemPriceList)
-        // Checkpoint 1: Commented console logs
-        // console.log('Initializing POS pricing data...')
-        await initializePOSData()
-        
-        if (posLoadError) {
-          // console.error('POS data loading error:', posLoadError)
-        } else if (posDataLoaded) {
-          // console.log('POS data loaded successfully')
-        }
-        
-      } catch (error) {
-        console.error('Error loading data or creating indexes:', error);
-      }
-    };
-    loadAllData();
-  }, [initializePOSData]); // Added initializePOSData as dependency
 
   // Update current date and time
   useEffect(() => {
@@ -253,6 +218,59 @@ const OrderPage = () => {
         ? { ...item, quantity: newQuantity, subtotal: item.price * newQuantity }
         : item
     ))
+  }
+
+  // Handle rate changes (only allowed if user has permission)
+  const handleRateChange = (id: string, newRate: number) => {
+    // Check permission before allowing change
+    if (!posPermissions?.enableRateChange) {
+      console.warn('⚠️ Rate change attempted but user does not have permission')
+      return
+    }
+
+    console.log('💰 Rate changed for item:', id, 'New rate:', newRate)
+    setOrderItems(orderItems.map(item => 
+      item.id === id 
+        ? { ...item, price: newRate, subtotal: newRate * item.quantity }
+        : item
+    ))
+  }
+
+  // Helper function to get product by item ID
+  const getProductById = async (itemId: string) => {
+    if (!localDB) {
+      throw new Error('Database not available')
+    }
+    
+    try {
+      // Try to get the product directly by ID first
+      const directResult = await localDB.get(itemId) as any
+      if (directResult && directResult.type === 'Item') {
+        return directResult
+      }
+    } catch (e) {
+      // If direct get fails, try searching
+    }
+    
+    // Fallback: search by item ID in all Item documents
+    const result = await localDB.find({ 
+      selector: { 
+        type: 'Item'
+      } 
+    })
+    
+    const product = result.docs.find((doc: any) => 
+      doc._id === itemId || 
+      doc.erpnext_id === itemId ||
+      doc.item_code === itemId ||
+      itemId.includes(doc.item_code) // Handle cases like "Item::StoreA::POS1::ITEM001"
+    )
+    
+    if (!product) {
+      throw new Error(`Product not found for ID: ${itemId}`)
+    }
+    
+    return product as any
   }
 
   const handleAddItemFromSearch = async (itemName: string) => {
@@ -403,6 +421,204 @@ const OrderPage = () => {
     }
   }
 
+  const handleSaveDraft = async () => {
+    try {
+      setShowConfirmDialog(false)
+      setSyncStatus('syncing')
+
+      console.log('Saving draft with items:', orderItems)
+      console.log('Draft continuation state:', { isDraftContinuation, draftId })
+      
+      // Generate draft ID using scalable logic
+      const generateDraftId = (params: {
+        isDraftContinuation: boolean
+        existingDraftId: string | null
+        orderData?: any
+        customerData?: any
+        timestamp?: Date
+      }) => {
+        const { isDraftContinuation, existingDraftId, timestamp = new Date() } = params
+        
+        if (isDraftContinuation && existingDraftId) {
+          // Updating existing draft
+          return {
+            draftId: existingDraftId,
+            isNewDraft: false
+          }
+        } else {
+          // Create new draft with unique ID
+          const timestampValue = timestamp.getTime()
+          const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0')
+          const draftId = `POSInvoice::StoreA::POS1::DRAFT-${timestampValue}-${random}`
+          
+          return {
+            draftId: draftId,
+            isNewDraft: true
+          }
+        }
+        
+        // Future custom logic for drafts can go here:
+        // - Sequential draft numbering: await getNextDraftNumber()
+        // - User-specific draft IDs: generateUserDraftId(user, timestamp)
+        // - Session-based draft management: getSessionDraftId(session)
+      }
+      
+      const draftIdInfo = generateDraftId({
+        isDraftContinuation,
+        existingDraftId: draftId,
+        orderData: orderItems,
+        customerData: selectedCustomer,
+        timestamp: new Date()
+      })
+      
+      const { draftId: currentDraftId, isNewDraft } = draftIdInfo
+      console.log('Generated/Using draft ID:', currentDraftId, isNewDraft ? '(creating new)' : '(updating existing)')
+      
+      // Date/time for draft creation
+      const now = new Date()
+      
+      // Calculate amounts
+      const subtotalAmount = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
+      const vatAmountForInvoice = subtotalAmount * 0.15 // 15% VAT
+      const totalAmount = subtotalAmount + vatAmountForInvoice - selectedDiscount
+
+      // Prepare draft invoice data
+      const draftData: any = {
+        _id: currentDraftId,
+        type: "POSInvoice",
+        erpnext_id: null, // No invoice number for drafts
+        customer_id: `Customer::StoreA::POS1::${selectedCustomer || 'Walk-in Customer'}`,
+        posting_date: now.toISOString().split("T")[0],
+        posting_time: now.toTimeString().split(" ")[0],
+        due_date: now.toISOString().split("T")[0],
+        total_amount: totalAmount,
+        paid_amount: 0, // Not paid yet for drafts
+        payment_method: selectedPaymentMethod,
+        status: "Draft",
+        is_pos: true,
+        is_return_credit_note: false,
+        pos_profile_id: currentPOSProfile?._id || "POSProfile::StoreA::POS1::POS Profile 1",
+        cashier_id: "User::StoreA::POS1::pos_user",
+        store_id: "Store::StoreA",
+        items: orderItems.map(item => ({
+          item_id: item.item_id,
+          qty: item.quantity,
+          rate: item.price,
+          amount: item.subtotal,
+          uom: item.uom || 'Nos'
+        })),
+        taxes: [
+          {
+            tax_type: "VAT",
+            tax_rate: 15,
+            tax_amount: vatAmountForInvoice
+          }
+        ],
+        discounts: [
+          {
+            discount_type: "General Discount",
+            discount_amount: selectedDiscount
+          }
+        ],
+        tip_amount: 0,
+        cash_received: selectedPaymentMethod === 'Cash' ? parseFloat(cashReceived) : 0,
+        creation_date: now.toISOString(),
+        modified_date: now.toISOString(),
+        hash: "TEMP_HASH",
+        previous_hash: "PREV_HASH",
+        SchemaVersion: "1.0",
+        CreatedBy: "POS_USER",
+        AuditLogId: `Audit::StoreA::POS1::AUDIT-${Date.now().toString().slice(-6)}`
+      }
+
+      // Save draft to local database
+      try {
+        console.log('Saving draft to local database...')
+        
+        if (!localDB) {
+          throw new Error('Local database not available')
+        }
+
+        // Handle revision for existing drafts
+        if (isDraftContinuation && draftId && currentDraftId === draftId) {
+          try {
+            const existingDraft = await localDB.get(currentDraftId) as any
+            draftData._rev = existingDraft._rev
+            console.log('Updating existing draft with rev:', existingDraft._rev)
+          } catch (e) {
+            // Draft doesn't exist anymore, create new one
+            console.log('Existing draft not found, creating new one')
+          }
+        } else {
+          console.log('Creating brand new draft')
+        }
+        
+        // Save to local DB
+        await localDB.put(draftData)
+        console.log('Draft saved to local database successfully')
+        
+        setSyncStatus('synced')
+        showToast('Draft saved successfully!', 'success')
+        
+        // Clear the order after successful save
+        setOrderItems([])
+        setCashReceived('0')
+        setSelectedDiscount(0)
+        setSelectedCustomer('')
+        setIsDraftContinuation(false)
+        setDraftId(null)
+        setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
+        
+      } catch (syncError) {
+        console.error('Save draft failed:', syncError)
+        setSyncStatus('error')
+        showToast('Failed to save draft. Please try again.', 'error')
+      }
+      
+    } catch (error) {
+      console.error('Error saving draft:', error)
+      setSyncStatus('error')
+      showToast('Failed to save draft. Please try again.', 'error')
+    }
+  }
+
+  // Scalable invoice number generation function
+  // TODO: This can be replaced with custom logic later (API calls, sequential numbering, etc.)
+  const generateInvoiceNumber = (params: {
+    isDraftContinuation: boolean
+    draftId: string | null
+    orderData?: any
+    customerData?: any
+    timestamp?: Date
+  }) => {
+    const { isDraftContinuation, draftId, timestamp = new Date() } = params
+    
+    if (isDraftContinuation && draftId) {
+      // Converting draft to final invoice - keep existing draft ID
+      return {
+        invoiceId: draftId,
+        erpnextId: draftId.split("::")[3], // Extract invoice number from draft ID
+        isFromDraft: true
+      }
+    } else {
+      // New invoice - generate fresh ID
+      const timestampSuffix = Date.now().toString().slice(-6)
+      const invoiceId = `POSInvoice::StoreA::POS1::${timestampSuffix}`
+      
+      return {
+        invoiceId: invoiceId,
+        erpnextId: timestampSuffix, // Clean invoice number for display
+        isFromDraft: false
+      }
+    }
+    
+    // Future custom logic can go here:
+    // - Database sequential numbering: await getNextSequentialNumber()
+    // - API-based numbering: await fetchCustomInvoiceNumber(params)
+    // - Store-specific formats: generateStoreSpecificNumber(store, date)
+    // - Customer-based prefixes: generateCustomerInvoiceNumber(customer, date)
+  }
+
   const handleConfirmOrder = async () => {
     try {
       setShowConfirmDialog(false)
@@ -410,10 +626,20 @@ const OrderPage = () => {
 
       console.log('Submitting order with items:', orderItems)
       
-      // Generate invoice ID following the exact format
+      // Generate invoice number using scalable logic
+      const invoiceNumberData = generateInvoiceNumber({
+        isDraftContinuation,
+        draftId,
+        orderData: orderItems,
+        customerData: selectedCustomer,
+        timestamp: new Date()
+      })
+      
+      const { invoiceId, erpnextId, isFromDraft } = invoiceNumberData
+      console.log('Generated invoice number:', { invoiceId, erpnextId, isFromDraft })
+      
+      // Date/time for invoice creation
       const now = new Date()
-      const invoiceId = `POSInvoice::StoreA::POS1::${Date.now().toString().slice(-6)}`
-      const erpnextId = invoiceId.split("::")[3]
       
       // Calculate amounts
       const subtotalAmount = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
@@ -421,7 +647,7 @@ const OrderPage = () => {
       const totalAmount = subtotalAmount + vatAmountForInvoice - selectedDiscount
 
       // Prepare invoice data following the exact schema
-      const invoiceData = {
+      const invoiceData: any = {
         _id: invoiceId,
         type: "POSInvoice",
         erpnext_id: erpnextId,
@@ -435,7 +661,7 @@ const OrderPage = () => {
         status: "Submitted",
         is_pos: true,
         is_return_credit_note: false,
-        pos_profile_id: "POSProfile::StoreA::POS1::POS Profile 1",
+        pos_profile_id: currentPOSProfile?._id || "POSProfile::StoreA::POS1::POS Profile 1",
         cashier_id: "User::StoreA::POS1::pos_user",
         store_id: "Store::StoreA",
         items: orderItems.map(item => ({
@@ -477,6 +703,17 @@ const OrderPage = () => {
           throw new Error('Local database not available')
         }
         
+        // If continuing from draft, get the revision to update existing document
+        if (isDraftContinuation && draftId) {
+          try {
+            const existingDraft = await localDB.get(draftId) as any
+            invoiceData._rev = existingDraft._rev
+          } catch (e) {
+            // Draft doesn't exist, create new one
+            console.log('Draft not found, creating new invoice')
+          }
+        }
+        
         // Save to local DB first - this is the primary operation
         await localDB.put(invoiceData)
         console.log('Invoice saved to local database successfully')
@@ -484,14 +721,11 @@ const OrderPage = () => {
         // Now try to sync to remote (secondary operation)
         try {
           console.log('Syncing to remote database...')
-          if (serviceWorkerReady) {
-            // Try service worker sync
-            await serviceWorkerManager.performSync('push')
-            console.log('Remote sync completed via Service Worker')
+          const syncResult = await performSync('push')
+          if (syncResult.success) {
+            console.log('Remote sync completed successfully')
           } else {
-            // Direct sync to remote
-            await performSync('push')
-            console.log('Remote sync completed directly')
+            console.log('Remote sync failed:', syncResult.error)
           }
         } catch (syncError) {
           console.log('Remote sync failed, but order was saved locally:', syncError)
@@ -506,6 +740,8 @@ const OrderPage = () => {
         setCashReceived('0')
         setSelectedDiscount(0)
         setSelectedCustomer('')
+        setIsDraftContinuation(false)
+        setDraftId(null)
         setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
         
       } catch (syncError) {
@@ -529,6 +765,20 @@ const OrderPage = () => {
       <div className="flex-1 flex flex-col lg:flex-row min-w-0">
         {/* Main Content */}
         <div className="flex-1 p-3 sm:p-4 lg:p-6 min-w-0">
+          {/* Draft Continuation Notice */}
+          {isDraftContinuation && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center">
+                <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-blue-800 text-sm font-medium">
+                  Continuing from draft invoice. Complete payment to generate final invoice with invoice number.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Mobile-responsive Header */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4 lg:mb-6 gap-3 sm:gap-4">
             <div className="flex-1 min-w-0">
@@ -566,12 +816,21 @@ const OrderPage = () => {
                   <span className="text-black font-medium text-xs sm:text-sm lg:text-base break-all sm:break-words">
                     {mounted ? (
                       <>
+                        {isDraftContinuation ? (
+                          <>
+                            <span className="hidden sm:inline text-yellow-600">DRAFT INVOICE - NO INVOICE NUMBER YET</span>
+                            <span className="sm:hidden text-yellow-600">DRAFT</span>
+                          </>
+                        ) : (
+                      <>
                         <span className="hidden sm:inline">
                           {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
                         </span>
                         <span className="sm:hidden">
                           {`INV: SINV-${Date.now().toString().slice(-6)}`}
                         </span>
+                          </>
+                        )}
                       </>
                     ) : (
                       'INVOICE #: Loading...'
@@ -602,6 +861,8 @@ const OrderPage = () => {
                           item={item}
                           onRemove={handleRemoveItem}
                           onQuantityChange={handleQuantityChange}
+                          onRateChange={handleRateChange}
+                          enableRateChange={posPermissions?.enableRateChange ?? false}
                         />
                       ))
                     ) : (
@@ -645,20 +906,36 @@ const OrderPage = () => {
           {/* Mobile layout - vertical sections */}
           <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6">
             
-            {/* Discount Section */}
-            <div>
-              <div className="flex items-center mb-2 sm:mb-3">
-                <Banknote size={20} className="text-gray-600 mr-2" />
-                <h3 className="font-semibold text-black text-sm lg:text-base">DISCOUNT</h3>
+            {/* Discount Section - Conditional based on POS Profile permissions */}
+            {posPermissions?.enableCustomerDiscount ? (
+              <div>
+                <div className="flex items-center mb-2 sm:mb-3">
+                  <Banknote size={20} className="text-gray-600 mr-2" />
+                  <h3 className="font-semibold text-black text-sm lg:text-base">DISCOUNT</h3>
+                </div>
+                <input
+                  type="number"
+                  value={selectedDiscount}
+                  onChange={(e) => setSelectedDiscount(Number(e.target.value))}
+                  placeholder="Enter discount amount"
+                  className="py-2 lg:py-3 px-3 border border-gray-300 rounded text-sm w-full text-black"
+                />
               </div>
-              <input
-                type="number"
-                value={selectedDiscount}
-                onChange={(e) => setSelectedDiscount(Number(e.target.value))}
-                placeholder="Enter discount amount"
-                className="py-2 lg:py-3 px-3 border border-gray-300 rounded text-sm w-full text-black"
-              />
-            </div>
+            ) : (
+              <div>
+                <div className="flex items-center mb-2 sm:mb-3">
+                  <Banknote size={20} className="text-gray-400 mr-2" />
+                  <h3 className="font-semibold text-gray-400 text-sm lg:text-base">DISCOUNT (Not Permitted)</h3>
+                </div>
+                <input
+                  type="number"
+                  value={selectedDiscount}
+                  disabled
+                  placeholder="Discount not allowed for this user"
+                  className="py-2 lg:py-3 px-3 border border-gray-200 rounded text-sm w-full text-gray-400 bg-gray-50 cursor-not-allowed"
+                />
+              </div>
+            )}
 
             {/* Transaction Methods */}
             <div>
@@ -744,7 +1021,7 @@ const OrderPage = () => {
             {syncStatus === 'syncing' ? (
               <span className="flex items-center justify-center space-x-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-sm lg:text-base">{serviceWorkerReady ? 'SAVING & SYNCING...' : 'SAVING...'}</span>
+                <span className="text-sm lg:text-base">SAVING...</span>
               </span>
             ) : orderItems.length === 0 ? (
               'ADD ITEMS TO SUBMIT'
@@ -866,26 +1143,33 @@ const OrderPage = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex space-x-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-3">
                 <button
                   onClick={() => setShowConfirmDialog(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  className="px-3 lg:px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 text-sm lg:text-base"
                 >
                   Cancel
                 </button>
                 <button
+                  onClick={handleSaveDraft}
+                  disabled={syncStatus === 'syncing'}
+                  className="px-3 lg:px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 text-sm lg:text-base"
+                >
+                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Update Draft' : 'Save as Draft'}
+                </button>
+                <button
                   onClick={handleConfirmOrder}
                   disabled={syncStatus === 'syncing'}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400"
+                  className="px-3 lg:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : 'Submit'}
+                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Pay & Generate Invoice' : 'Submit'}
                 </button>
                 <button
                   onClick={handleConfirmAndPrint}
                   disabled={syncStatus === 'syncing'}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400"
+                  className="px-3 lg:px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : 'Submit & Print'}
+                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Pay & Print Invoice' : 'Submit & Print'}
                 </button>
               </div>
             </div>
