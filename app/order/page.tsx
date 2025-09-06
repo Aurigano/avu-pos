@@ -62,8 +62,11 @@ const OrderPage = () => {
         allowNegativeStock: currentProfile.permissions.allowNegativeStock
       })
       console.log('📋 POS Permissions updated:', currentProfile.permissions)
+      console.log('📋 Current POS Profile:', currentProfile.profile?.name, currentProfile.profile?._id)
     }
   }
+
+  // Note: POS permissions logging moved to useEffect
 
   // Simple sync function for order operations only
   const performSync = async (direction: 'pull' | 'push' | 'both' = 'both') => {
@@ -162,6 +165,15 @@ const OrderPage = () => {
     // Check database initialization status and initialize POS store
   useEffect(() => {
     const initializeOrderPage = async () => {
+      // Debug: Log all POS-related localStorage values at page start
+      console.log('🚀 OrderPage initializing - Current localStorage:', {
+        'dbInitialized': localStorage.getItem('dbInitialized'),
+        'posProfileName': localStorage.getItem('posProfileName'),
+        'posProfile': localStorage.getItem('posProfile'),
+        'pos_current_profile_name': localStorage.getItem('pos_current_profile_name'),
+        'pos_current_profile': localStorage.getItem('pos_current_profile') ? 'exists' : 'not found'
+      })
+      
       // Check if database was initialized during login
       const dbInitialized = localStorage.getItem('dbInitialized')
       const posProfileName = localStorage.getItem('posProfileName')
@@ -196,6 +208,15 @@ const OrderPage = () => {
 
     initializeOrderPage()
   }, [posDataLoaded, initializePOSData]);
+
+  // Separate effect to update permissions when profile changes
+  useEffect(() => {
+    if (currentPOSProfile) {
+      console.log('🔄 POS profile changed, updating permissions...')
+      console.log('📋 New Profile:', currentPOSProfile.name, 'ID:', currentPOSProfile._id)
+      updatePOSPermissions()
+    }
+  }, [currentPOSProfile]);
 
 
 
@@ -439,7 +460,7 @@ const OrderPage = () => {
     }
   }
 
-  const handlePrintOrder = async () => {
+  const handlePrintOrder = async (invoiceNumber?: string) => {
     const orderData = {
       items: orderItems.map(item => ({
         id: item.id,
@@ -455,16 +476,18 @@ const OrderPage = () => {
       discountAmount,
       total,
       cashReceived: selectedPaymentMethod === 'Cash' ? cashReceived : undefined,
-      currentDateTime
+      currentDateTime,
+      invoiceNumber // Pass the actual invoice number if provided
     }
 
     await printOrderReceipt(orderData)
   }
 
   const handleConfirmAndPrint = async () => {
-    await handleConfirmOrder()
+    const result = await handleConfirmOrder()
     setTimeout(() => {
-      handlePrintOrder()
+      // result should contain the invoice number if successful
+      handlePrintOrder(result?.invoiceNumber)
     }, 1000) // Small delay to ensure order is saved before printing
   }
 
@@ -504,7 +527,7 @@ const OrderPage = () => {
       console.log('Saving draft with items:', orderItems)
       console.log('Draft continuation state:', { isDraftContinuation, draftId })
       
-      // Generate draft ID using scalable logic
+      // Generate draft ID using Store-Terminal format with DRAFT prefix
       const generateDraftId = (params: {
         isDraftContinuation: boolean
         existingDraftId: string | null
@@ -521,21 +544,24 @@ const OrderPage = () => {
             isNewDraft: false
           }
         } else {
-          // Create new draft with unique ID
+          // Create new draft with Store-Terminal-DRAFT-Timestamp format
+          const { storeNum, terminalNum } = getStoreTerminalInfo()
           const timestampValue = timestamp.getTime()
-          const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0')
-          const draftId = `POSInvoice::StoreA::POS1::DRAFT-${timestampValue}-${random}`
+          const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0')
+          const draftNumber = `DRAFT-${storeNum}-${terminalNum}-${timestampValue}-${random}`
+          const draftId = `POSInvoice::StoreA::POS1::${draftNumber}`
+          
+          console.log('📝 Generated draft ID:', draftNumber, {
+            store: storeNum,
+            terminal: terminalNum,
+            timestamp: timestampValue
+          })
           
           return {
             draftId: draftId,
             isNewDraft: true
           }
         }
-        
-        // Future custom logic for drafts can go here:
-        // - Sequential draft numbering: await getNextDraftNumber()
-        // - User-specific draft IDs: generateUserDraftId(user, timestamp)
-        // - Session-based draft management: getSessionDraftId(session)
       }
       
       const draftIdInfo = generateDraftId({
@@ -572,7 +598,7 @@ const OrderPage = () => {
         status: "Draft",
         is_pos: true,
         is_return_credit_note: false,
-        pos_profile_id: currentPOSProfile?._id || "POSProfile::StoreA::POS1::POS Profile 1",
+        pos_profile_id: currentPOSProfile?._id || "",
         cashier_id: "User::StoreA::POS1::pos_user",
         store_id: "Store::StoreA",
         items: orderItems.map(item => ({
@@ -641,8 +667,51 @@ const OrderPage = () => {
     }
   }
 
-  // Scalable invoice number generation function
-  // TODO: This can be replaced with custom logic later (API calls, sequential numbering, etc.)
+  // Helper function to get next invoice sequence number
+  const getNextInvoiceSeqNo = (): number => {
+    try {
+      const currentSeqNo = localStorage.getItem('invoiceSeqNo')
+      const seqNo = currentSeqNo ? parseInt(currentSeqNo, 10) : 1
+      
+      console.log('📊 Getting next invoice sequence number:', seqNo)
+      return seqNo
+    } catch (error) {
+      console.error('❌ Error getting invoice sequence number:', error)
+      return 1 // Fallback to 1
+    }
+  }
+
+  // Helper function to increment invoice sequence number in localStorage
+  const incrementInvoiceSeqNo = (): void => {
+    try {
+      const currentSeqNo = getNextInvoiceSeqNo()
+      const nextSeqNo = currentSeqNo + 1
+      localStorage.setItem('invoiceSeqNo', nextSeqNo.toString())
+      console.log('📈 Invoice sequence incremented:', currentSeqNo, '->', nextSeqNo)
+    } catch (error) {
+      console.error('❌ Error incrementing invoice sequence number:', error)
+    }
+  }
+
+  // Helper function to get store and terminal info for invoice numbering
+  const getStoreTerminalInfo = (): { store: string; terminal: string; storeNum: string; terminalNum: string } => {
+    try {
+      const store = localStorage.getItem('store') || 'store-1'
+      const terminal = localStorage.getItem('terminal') || 'pos-1'
+      
+      // Extract numbers from store and terminal IDs
+      // e.g., 'store-1' -> '1', 'pos-2' -> '2'
+      const storeNum = store.split('-').pop() || '1'
+      const terminalNum = terminal.split('-').pop() || '1'
+      
+      return { store, terminal, storeNum, terminalNum }
+    } catch (error) {
+      console.error('❌ Error getting store/terminal info:', error)
+      return { store: 'store-1', terminal: 'pos-1', storeNum: '1', terminalNum: '1' }
+    }
+  }
+
+  // New invoice number generation function: Store-Terminal-SeqNo format
   const generateInvoiceNumber = (params: {
     isDraftContinuation: boolean
     draftId: string | null
@@ -650,35 +719,62 @@ const OrderPage = () => {
     customerData?: any
     timestamp?: Date
   }) => {
-    const { isDraftContinuation, draftId, timestamp = new Date() } = params
+    const { isDraftContinuation, draftId } = params
     
     if (isDraftContinuation && draftId) {
-      // Converting draft to final invoice - keep existing draft ID
-      return {
-        invoiceId: draftId,
-        erpnextId: draftId.split("::")[3], // Extract invoice number from draft ID
-        isFromDraft: true
-      }
-    } else {
-      // New invoice - generate fresh ID
-      const timestampSuffix = Date.now().toString().slice(-6)
-      const invoiceId = `POSInvoice::StoreA::POS1::${timestampSuffix}`
-      
-      return {
-        invoiceId: invoiceId,
-        erpnextId: timestampSuffix, // Clean invoice number for display
-        isFromDraft: false
+      // Converting draft to final invoice - extract existing sequence from draft
+      try {
+        const draftParts = draftId.split("::")
+        if (draftParts.length >= 4 && draftParts[3].startsWith('DRAFT-')) {
+          // This is a draft, generate new invoice number for final invoice
+          const { storeNum, terminalNum } = getStoreTerminalInfo()
+          const seqNo = getNextInvoiceSeqNo()
+          const invoiceNumber = `${storeNum}-${terminalNum}-${seqNo.toString().padStart(6, '0')}`
+          
+          return {
+            invoiceId: `POSInvoice::StoreA::POS1::${invoiceNumber}`,
+            erpnextId: invoiceNumber,
+            invoiceNumber: invoiceNumber,
+            sequenceNo: seqNo,
+            isFromDraft: true
+          }
+        } else {
+          // This might already be a final invoice, just return as is
+          return {
+            invoiceId: draftId,
+            erpnextId: draftParts[3] || draftId,
+            invoiceNumber: draftParts[3] || draftId,
+            sequenceNo: null,
+            isFromDraft: true
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error processing draft invoice ID:', error)
+        // Fallback to generating new number
       }
     }
     
-    // Future custom logic can go here:
-    // - Database sequential numbering: await getNextSequentialNumber()
-    // - API-based numbering: await fetchCustomInvoiceNumber(params)
-    // - Store-specific formats: generateStoreSpecificNumber(store, date)
-    // - Customer-based prefixes: generateCustomerInvoiceNumber(customer, date)
+    // Generate new invoice number for new invoices or fallback
+    const { storeNum, terminalNum } = getStoreTerminalInfo()
+    const seqNo = getNextInvoiceSeqNo()
+    const invoiceNumber = `${storeNum}-${terminalNum}-${seqNo.toString().padStart(6, '0')}`
+    
+    console.log('🧾 Generated invoice number:', invoiceNumber, {
+      store: storeNum,
+      terminal: terminalNum,
+      sequence: seqNo
+    })
+    
+    return {
+      invoiceId: `POSInvoice::StoreA::POS1::${invoiceNumber}`,
+      erpnextId: invoiceNumber,
+      invoiceNumber: invoiceNumber,
+      sequenceNo: seqNo,
+      isFromDraft: false
+    }
   }
 
-  const handleConfirmOrder = async () => {
+  const handleConfirmOrder = async (): Promise<{ invoiceNumber: string } | void> => {
     try {
       setShowConfirmDialog(false)
       setSyncStatus('syncing')
@@ -694,8 +790,8 @@ const OrderPage = () => {
         timestamp: new Date()
       })
       
-      const { invoiceId, erpnextId, isFromDraft } = invoiceNumberData
-      console.log('Generated invoice number:', { invoiceId, erpnextId, isFromDraft })
+      const { invoiceId, erpnextId, invoiceNumber, sequenceNo, isFromDraft } = invoiceNumberData
+      console.log('Generated invoice number:', { invoiceId, erpnextId, invoiceNumber, sequenceNo, isFromDraft })
       
       // Date/time for invoice creation
       const now = new Date()
@@ -720,7 +816,7 @@ const OrderPage = () => {
         status: "Submitted",
         is_pos: true,
         is_return_credit_note: false,
-        pos_profile_id: currentPOSProfile?._id || "POSProfile::StoreA::POS1::POS Profile 1",
+        pos_profile_id: currentPOSProfile?._id || "",
         cashier_id: "User::StoreA::POS1::pos_user",
         store_id: "Store::StoreA",
         items: orderItems.map(item => ({
@@ -777,6 +873,12 @@ const OrderPage = () => {
         await localDB.put(invoiceData)
         console.log('Invoice saved to local database successfully')
         
+        // Increment invoice sequence number after successful save
+        if (sequenceNo !== null) {
+          incrementInvoiceSeqNo()
+          console.log('✅ Invoice sequence number incremented after successful save')
+        }
+        
         // Now try to sync to remote (secondary operation)
         try {
           console.log('Syncing to remote database...')
@@ -812,6 +914,9 @@ const OrderPage = () => {
         setIsDraftContinuation(false)
         setDraftId(null)
         setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
+        
+        // Return the invoice number for printing
+        return { invoiceNumber }
         
       } catch (syncError) {
         console.error('Save and sync failed:', syncError)
@@ -891,14 +996,23 @@ const OrderPage = () => {
                             <span className="sm:hidden text-yellow-600">DRAFT</span>
                           </>
                         ) : (
-                      <>
-                        <span className="hidden sm:inline">
-                          {`INVOICE #: SINV-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`}
-                        </span>
-                        <span className="sm:hidden">
-                          {`INV: SINV-${Date.now().toString().slice(-6)}`}
-                        </span>
-                          </>
+                          (() => {
+                            // Preview the next invoice number that will be generated
+                            const { storeNum, terminalNum } = getStoreTerminalInfo()
+                            const nextSeq = getNextInvoiceSeqNo()
+                            const previewInvoiceNumber = `${storeNum}-${terminalNum}-${nextSeq.toString().padStart(6, '0')}`
+                            
+                            return (
+                              <>
+                                <span className="hidden sm:inline">
+                                  {`NEXT INVOICE #: ${previewInvoiceNumber}`}
+                                </span>
+                                <span className="sm:hidden">
+                                  {`NEXT: ${previewInvoiceNumber}`}
+                                </span>
+                              </>
+                            )
+                          })()
                         )}
                       </>
                     ) : (

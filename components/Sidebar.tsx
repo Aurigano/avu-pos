@@ -4,6 +4,7 @@ import { ShoppingCart, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import LogoutButton from './LogoutButton'
+import CloseShiftButton from './CloseShiftButton'
 
 const Sidebar = () => {
   const pathname = usePathname()
@@ -50,8 +51,11 @@ const Sidebar = () => {
             })}
           </div>
           
-          {/* Logout */}
-          <LogoutButton variant="mobile" />
+          {/* Action Buttons */}
+          <div className="flex items-center space-x-1">
+            <LogoutButton variant="mobile" />
+            <CloseShiftButton variant="mobile" />
+          </div>
         </div>
       </div>
 
@@ -74,8 +78,11 @@ const Sidebar = () => {
             )
           })}
           
-          {/* Logout Button */}
-          <LogoutButton variant="desktop" />
+          {/* Action Buttons - placed at bottom */}
+          <div className="mt-auto">
+            <LogoutButton variant="desktop" />
+            <CloseShiftButton variant="desktop" />
+          </div>
         </div>
       </div>
     </>

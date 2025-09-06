@@ -19,6 +19,7 @@ export interface OrderData {
   total: number
   cashReceived?: string
   currentDateTime: string
+  invoiceNumber?: string  // New field for actual invoice number
 }
 
 // Types for invoice data (from invoice page)
@@ -110,7 +111,9 @@ export const printOrderReceipt = async (orderData: OrderData) => {
       hour12: true 
     })
     
-    const invoiceNumber = `SINV-${printDate.getFullYear()}-${String(printDate.getMonth() + 1).padStart(2, '0')}-${String(printDate.getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`
+    // Use provided invoice number or generate a fallback
+    const invoiceNumber = orderData.invoiceNumber || 
+      `TEMP-${printDate.getFullYear()}-${String(printDate.getMonth() + 1).padStart(2, '0')}-${String(printDate.getDate()).padStart(2, '0')}-${Date.now().toString().slice(-6)}`
 
     printWindow.document.write(`
       <!DOCTYPE html>

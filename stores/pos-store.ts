@@ -50,13 +50,40 @@ export const usePOSStore = create<POSStore>((set, get) => ({
 
   // Save POS profile to localStorage
   savePOSProfileToStorage: (profile: POSProfile) => {
-    if (typeof window === 'undefined') return
+    console.log('🔧 savePOSProfileToStorage called with:', profile?.name, profile?.erpnext_id)
+    
+    if (typeof window === 'undefined') {
+      console.warn('⚠️ Cannot save POS profile - running on server side')
+      return
+    }
+    
+    if (!profile) {
+      console.error('❌ Cannot save POS profile - profile is null/undefined')
+      return
+    }
+    
     try {
+      console.log('💾 Attempting to save to localStorage...')
+      console.log('🔑 Keys to set:', { 
+        [POS_PROFILE_STORAGE_KEY]: POS_PROFILE_STORAGE_KEY,
+        [POS_PROFILE_NAME_STORAGE_KEY]: POS_PROFILE_NAME_STORAGE_KEY 
+      })
+      
       localStorage.setItem(POS_PROFILE_STORAGE_KEY, JSON.stringify(profile))
       localStorage.setItem(POS_PROFILE_NAME_STORAGE_KEY, profile.erpnext_id)
-      console.log('POS profile saved to localStorage:', profile.erpnext_id)
+      
+      // Verify the save worked
+      const savedProfile = localStorage.getItem(POS_PROFILE_STORAGE_KEY)
+      const savedName = localStorage.getItem(POS_PROFILE_NAME_STORAGE_KEY)
+      
+      console.log('🔐 POS profile saved to localStorage:', profile.erpnext_id)
+      console.log('✅ Verification - saved keys exist:', {
+        [POS_PROFILE_STORAGE_KEY]: savedProfile ? 'EXISTS' : 'MISSING',
+        [POS_PROFILE_NAME_STORAGE_KEY]: savedName || 'MISSING'
+      })
     } catch (error) {
-      console.error('Error saving POS profile to storage:', error)
+      console.error('❌ Error saving POS profile to storage:', error)
+      console.error('❌ Profile object:', profile)
     }
   },
 
@@ -64,9 +91,14 @@ export const usePOSStore = create<POSStore>((set, get) => ({
   clearPOSProfileStorage: () => {
     if (typeof window === 'undefined') return
     try {
+      console.log('🗑️ Clearing POS profile storage...')
+      console.log('🔍 Before clear:', {
+        [POS_PROFILE_STORAGE_KEY]: localStorage.getItem(POS_PROFILE_STORAGE_KEY) ? 'exists' : 'not found',
+        [POS_PROFILE_NAME_STORAGE_KEY]: localStorage.getItem(POS_PROFILE_NAME_STORAGE_KEY)
+      })
       localStorage.removeItem(POS_PROFILE_STORAGE_KEY)
       localStorage.removeItem(POS_PROFILE_NAME_STORAGE_KEY)
-      console.log('POS profile cleared from localStorage')
+      console.log('🗑️ POS profile cleared from localStorage')
     } catch (error) {
       console.error('Error clearing POS profile from storage:', error)
     }
@@ -74,9 +106,19 @@ export const usePOSStore = create<POSStore>((set, get) => ({
 
   // Switch to a different POS profile (useful for login API integration)
   switchPOSProfile: async (profileName: string) => {
-    console.log('Switching to POS profile:', profileName)
+    console.log('🔄 Switching to POS profile:', profileName)
+    console.log('🔍 Current localStorage before switch:', {
+      'pos_current_profile_name': localStorage.getItem('pos_current_profile_name'),
+      'posProfileName': localStorage.getItem('posProfileName'),
+      'posProfile': localStorage.getItem('posProfile')
+    })
     const { initializePOSData } = get()
     await initializePOSData(profileName)
+    console.log('🔍 Current localStorage after switch:', {
+      'pos_current_profile_name': localStorage.getItem('pos_current_profile_name'),
+      'posProfileName': localStorage.getItem('posProfileName'),
+      'posProfile': localStorage.getItem('posProfile')
+    })
   },
 
   // Initialize POS data from database
@@ -89,11 +131,9 @@ export const usePOSStore = create<POSStore>((set, get) => ({
       }
 
       // Determine which profile to load
-      // Priority: 1. Parameter, 2. localStorage, 3. Default "POS Profile 1"
+      // Priority: 1. Parameter, 2. localStorage
       const { loadPOSProfileFromStorage } = get()
-      const targetProfileName = profileName || 
-                               loadPOSProfileFromStorage() || 
-                               'POS Profile 1'  // Default for now, will come from login API later
+      const targetProfileName = profileName || loadPOSProfileFromStorage()
       
       console.log('Loading POS Profile:', targetProfileName)
       
@@ -106,6 +146,7 @@ export const usePOSStore = create<POSStore>((set, get) => ({
       // Find all POSProfile documents
       const posProfiles = docs.filter((doc: any) => doc.type === 'POSProfile')
       console.log('Found', posProfiles.length, 'POS profiles:', posProfiles.map((p: any) => p.erpnext_id))
+      console.log('POSSSSS', posProfiles)
       
       // Find the target POS profile by erpnext_id
       const targetPOSProfile = posProfiles.find((profile: any) => 
@@ -127,8 +168,18 @@ export const usePOSStore = create<POSStore>((set, get) => ({
       console.log('Filtered to', filteredPrices.length, 'matching price list items for price list:', targetPOSProfile.price_list_id)
       
       // Save to localStorage for persistence
+      console.log('💾 About to save POS profile to storage:', targetPOSProfile.name)
+      console.log('🔍 Profile object details:', {
+        _id: targetPOSProfile._id,
+        name: targetPOSProfile.name,
+        erpnext_id: targetPOSProfile.erpnext_id,
+        hasProfile: !!targetPOSProfile
+      })
+      
       const { savePOSProfileToStorage } = get()
+      console.log('📞 Calling savePOSProfileToStorage...')
       savePOSProfileToStorage(targetPOSProfile as POSProfile)
+      console.log('✅ savePOSProfileToStorage call completed')
       
       // Update store
       set({
@@ -138,6 +189,12 @@ export const usePOSStore = create<POSStore>((set, get) => ({
         filteredPriceList: filteredPrices,
         isLoaded: true,
         loadError: null
+      })
+      
+      // Final verification that localStorage was saved correctly
+      console.log('🔍 Final localStorage verification after store update:', {
+        'pos_current_profile': localStorage.getItem('pos_current_profile') ? 'EXISTS' : 'MISSING',
+        'pos_current_profile_name': localStorage.getItem('pos_current_profile_name') || 'MISSING'
       })
       
       console.log('POS data initialization completed successfully')

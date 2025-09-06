@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Store, Monitor, Settings, LogIn, User } from 'lucide-react'
 import { posApi, handleApiError, sessionUtils, type ApiError } from '@/lib/api-service'
 import { localDB } from '@/lib/pouchdb'
+import { usePOSStore } from '@/stores/pos-store'
 
 const SelectPage = () => {
   const [selectedPOSProfile, setSelectedPOSProfile] = useState('')
@@ -16,6 +17,9 @@ const SelectPage = () => {
   const [posProfiles, setPosProfiles] = useState<Array<{id: string, name: string}>>([])
   const [loadingProfiles, setLoadingProfiles] = useState(true)
   const router = useRouter()
+  
+  // Get POS store methods for proper profile management
+  const { switchPOSProfile } = usePOSStore()
 
   // Check if user is logged in and load persisted selections
   useEffect(() => {
@@ -74,11 +78,14 @@ const SelectPage = () => {
       })
 
       const profiles = result.docs.map((doc: any) => ({
-        id: doc._id,
-        name: doc.profile_name || doc.name || doc._id || 'Unknown Profile'
+        id: doc.erpnext_id || doc._id, // Use erpnext_id for POS store compatibility
+        name: doc.profile_name || doc.name || doc._id || 'Unknown Profile',
+        _id: doc._id, // Keep _id for debugging
+        erpnext_id: doc.erpnext_id
       }))
 
       console.log(`✅ Loaded ${profiles.length} POS Profiles:`, profiles)
+      console.log('🔍 Profile details:', profiles.map(p => ({ id: p.id, name: p.name, erpnext_id: p.erpnext_id })))
       setPosProfiles(profiles)
       
     } catch (error) {
@@ -170,10 +177,36 @@ const SelectPage = () => {
         localStorage.setItem('shiftStartTime', shiftStartTime)
         
         // Store session data (keep existing for backward compatibility)
+        console.log('💾 Setting basic localStorage keys...')
         localStorage.setItem('posProfile', selectedPOSProfile)
+        localStorage.setItem('posProfileName', selectedPOSProfile) // Add this key for order page compatibility
         localStorage.setItem('store', selectedStore)
         localStorage.setItem('terminal', selectedTerminal)
         localStorage.setItem('shiftOpen', 'true')
+        
+        console.log('🔍 localStorage after basic keys:', {
+          'posProfile': localStorage.getItem('posProfile'),
+          'posProfileName': localStorage.getItem('posProfileName'),
+          'pos_current_profile_name': localStorage.getItem('pos_current_profile_name')
+        })
+        
+        // Initialize POS store with the selected profile
+        try {
+          console.log('🏪 Initializing POS store with selected profile:', selectedPOSProfile)
+          await switchPOSProfile(selectedPOSProfile)
+          console.log('✅ POS store initialized with profile:', selectedPOSProfile)
+          
+          // Final check of localStorage after POS store initialization
+          console.log('🔍 Final localStorage check:', {
+            'posProfile': localStorage.getItem('posProfile'),
+            'posProfileName': localStorage.getItem('posProfileName'),
+            'pos_current_profile_name': localStorage.getItem('pos_current_profile_name'),
+            'pos_current_profile': localStorage.getItem('pos_current_profile') ? 'exists' : 'not found'
+          })
+        } catch (posError) {
+          console.warn('⚠️ Failed to initialize POS store, but continuing:', posError)
+          // Don't block the flow if POS initialization fails
+        }
         
         console.log(`✅ Shift opened: ${result.message.name} for user: ${result.message.user}`)
         

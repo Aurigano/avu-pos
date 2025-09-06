@@ -8,17 +8,16 @@ import { usePOSStore } from '@/stores/pos-store'
  * Update this when login API is implemented
  */
 export const POSProfileConfig = {
-  // Default profile name - will be replaced by login API response
-  DEFAULT_PROFILE: 'POS Profile 1',
+  // No default profile - user must select one during login
   
   // Future: This will come from login API
   // getCurrentUserProfile: () => getFromLoginAPI(),
   
   // Future: Profile mapping based on user roles
   // USER_PROFILE_MAPPING: {
-  //   'cashier': 'POS Profile 1',
-  //   'manager': 'Manager POS Profile',
-  //   'admin': 'Admin POS Profile'
+  //   'cashier': 'Cashier Profile',
+  //   'manager': 'Manager Profile',
+  //   'admin': 'Admin Profile'
   // }
 }
 
@@ -33,10 +32,12 @@ export const initializePOSProfile = async (userProfileName?: string) => {
     // Priority order:
     // 1. User profile from login API (future)
     // 2. Profile name from localStorage (current session)  
-    // 3. Default profile
-    const profileName = userProfileName || 
-                       loadPOSProfileFromStorage() || 
-                       POSProfileConfig.DEFAULT_PROFILE
+    // No fallback - user must have selected a profile during login
+    const profileName = userProfileName || loadPOSProfileFromStorage()
+    
+    if (!profileName) {
+      throw new Error('No POS profile selected. Please login and select a profile.')
+    }
     
     console.log('🔧 Initializing POS with profile:', profileName)
     await initializePOSData(profileName)

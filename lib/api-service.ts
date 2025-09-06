@@ -209,7 +209,7 @@ export const posApi = {
     period_end_date: string
     pos_opening_entry: string
   }): Promise<any> => {
-    return apiCall('resource/POS Closing Entry', {
+    return apiCall('pos_retail.api.create_pos_closing_entry', {
       method: 'POST',
       body: JSON.stringify(closingData)
     }, true)
