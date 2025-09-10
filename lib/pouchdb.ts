@@ -33,12 +33,12 @@ class PouchDBManager {
       PouchDB.plugin(PouchDBAdapterHttp)
 
       // Create database instances only once
-      this._localDB = new PouchDB('local_posdb', {
+      this._localDB = new PouchDB('local_retailpos', {
         auto_compaction: true, // Enable auto-compaction
         revs_limit: 10 // Limit revision history to save space
       })
 
-      this._remoteDB = new PouchDB('https://admin:123@couchdbtest.etoserp.com:6984/posdb', {
+      this._remoteDB = new PouchDB('https://admin:123@couchdbtest.etoserp.com:6984/retailpos', {
         skip_setup: true // Skip database creation on remote
       })
 

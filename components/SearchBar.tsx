@@ -168,11 +168,12 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect, r
   }
 
   return (
-    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 w-full">
+    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 w-full" id="searchBar">
       {/* Product Search */}
       <div ref={productSearchRef} className="relative flex-1 min-w-0">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
         <input
+          id="productSearch"
           type="text"
           placeholder="Product search..."
           value={productSearchTerm}
@@ -204,7 +205,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect, r
                 className="px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
               >
                 <div className="flex items-center">
-                  {product.image ? (
+                  {/* {product.image ? (
                     <img 
                       src={product.image} 
                       alt={product.item_name}
@@ -223,7 +224,7 @@ const SearchBar: React.FC<SearchBarProps> = ({ onItemSelect, onCustomerSelect, r
                   )}
                   <div className="hidden w-8 h-8 bg-gray-200 rounded mr-3 flex items-center justify-center">
                     <Search size={12} className="text-gray-400" />
-                  </div>
+                  </div> */}
                   <div className="flex flex-col min-w-0 flex-1">
                     <span className="text-gray-700 font-medium truncate">{product.item_name}</span>
                     <span className="text-xs text-gray-500 truncate">

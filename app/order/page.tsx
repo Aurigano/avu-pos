@@ -4,7 +4,10 @@ import { useState, useEffect } from 'react'
 import { Calendar, CreditCard, Banknote } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import OrderItem from '../../components/OrderItem'
-import SearchBar from '../../components/SearchBar'
+
+import ProductSearch from '../../components/ProductSearch'
+import CustomerSearch from '../../components/CustomerSearch'
+import DateTime from '../../components/DateTime'
 import { useHydration } from '../../hooks/useHydration'
 import { localDB, remoteDB } from '@/lib/pouchdb'
 import { usePOSStore } from '@/stores/pos-store'
@@ -29,7 +32,7 @@ const OrderPage = () => {
   const [orderItems, setOrderItems] = useState<OrderItemType[]>([])
   const [cashReceived, setCashReceived] = useState<string>('0')
   const [selectedDiscount, setSelectedDiscount] = useState<number>(0)
-  const [currentDateTime, setCurrentDateTime] = useState<string>('')
+
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'Cash' | 'Card' | 'Voucher'>('Cash')
   const [selectedCustomer, setSelectedCustomer] = useState<string>('')
   const mounted = useHydration()
@@ -220,32 +223,19 @@ const OrderPage = () => {
 
 
 
-  // Update current date and time
-  useEffect(() => {
-    
-    const updateDateTime = () => {
-      const now = new Date()
-      const options: Intl.DateTimeFormatOptions = {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
-      }
-      setCurrentDateTime(now.toLocaleDateString('en-US', options))
-    }
 
-    updateDateTime()
-    const interval = setInterval(updateDateTime, 1000) // Update every second
-
-    return () => clearInterval(interval)
-  }, [])
 
   const subtotal = orderItems.reduce((sum, item) => sum + item.subtotal, 0)
   const discountAmount = selectedDiscount
   const vatAmount = subtotal * 0.15 // 15% VAT
   const total = subtotal + vatAmount - discountAmount
+
+  // Auto-update cash received to match total when payment method is Cash
+  useEffect(() => {
+    if (selectedPaymentMethod === 'Cash') {
+      setCashReceived(total.toFixed(2))
+    }
+  }, [total, selectedPaymentMethod])
 
   const handleRemoveItem = (id: string) => {
     setOrderItems(orderItems.filter(item => item.id !== id))
@@ -476,7 +466,18 @@ const OrderPage = () => {
       discountAmount,
       total,
       cashReceived: selectedPaymentMethod === 'Cash' ? cashReceived : undefined,
-      currentDateTime,
+      currentDateTime: (() => {
+        const now = new Date()
+        const options: Intl.DateTimeFormatOptions = {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true
+        }
+        return now.toLocaleDateString('en-US', options)
+      })(),
       invoiceNumber // Pass the actual invoice number if provided
     }
 
@@ -699,10 +700,27 @@ const OrderPage = () => {
       const store = localStorage.getItem('store') || 'store-1'
       const terminal = localStorage.getItem('terminal') || 'pos-1'
       
-      // Extract numbers from store and terminal IDs
-      // e.g., 'store-1' -> '1', 'pos-2' -> '2'
-      const storeNum = store.split('-').pop() || '1'
-      const terminalNum = terminal.split('-').pop() || '1'
+      // Extract numbers from erpnext_id values using regex
+      // This will extract all numbers from the erpnext_id and join them
+      // e.g., 'STORE-001-MAIN' -> '001', 'POS-TERMINAL-002' -> '002'
+      const extractNumbers = (erpnextId: string): string => {
+        const numbers = erpnextId.match(/\d+/g) // Find all number sequences
+        if (numbers && numbers.length > 0) {
+          // Use the last number sequence found, or concatenate if multiple
+          return numbers[numbers.length - 1]
+        }
+        return '1' // Default fallback
+      }
+      
+      const storeNum = extractNumbers(store)
+      const terminalNum = extractNumbers(terminal)
+      
+      console.log('🔢 Extracted numbers from erpnext_id:', {
+        store: store,
+        storeNum: storeNum,
+        terminal: terminal,
+        terminalNum: terminalNum
+      })
       
       return { store, terminal, storeNum, terminalNum }
     } catch (error) {
@@ -711,7 +729,7 @@ const OrderPage = () => {
     }
   }
 
-  // New invoice number generation function: Store-Terminal-SeqNo format
+  // New invoice number generation function: Store-Terminal-Date(DDMMYY)-SeqNo format
   const generateInvoiceNumber = (params: {
     isDraftContinuation: boolean
     draftId: string | null
@@ -719,7 +737,14 @@ const OrderPage = () => {
     customerData?: any
     timestamp?: Date
   }) => {
-    const { isDraftContinuation, draftId } = params
+    const { isDraftContinuation, draftId, timestamp } = params
+    
+    // Generate date string in DDMMYY format
+    const now = timestamp || new Date()
+    const year = now.getFullYear().toString().slice(-2) // Last 2 digits of year
+    const month = (now.getMonth() + 1).toString().padStart(2, '0') // Month 01-12
+    const day = now.getDate().toString().padStart(2, '0') // Day 01-31
+    const dateStr = `${day}${month}${year}` // DDMMYY format
     
     if (isDraftContinuation && draftId) {
       // Converting draft to final invoice - extract existing sequence from draft
@@ -729,7 +754,7 @@ const OrderPage = () => {
           // This is a draft, generate new invoice number for final invoice
           const { storeNum, terminalNum } = getStoreTerminalInfo()
           const seqNo = getNextInvoiceSeqNo()
-          const invoiceNumber = `${storeNum}-${terminalNum}-${seqNo.toString().padStart(6, '0')}`
+          const invoiceNumber = `${storeNum}-${terminalNum}-${dateStr}-${seqNo.toString().padStart(6, '0')}`
           
           return {
             invoiceId: `POSInvoice::StoreA::POS1::${invoiceNumber}`,
@@ -757,11 +782,12 @@ const OrderPage = () => {
     // Generate new invoice number for new invoices or fallback
     const { storeNum, terminalNum } = getStoreTerminalInfo()
     const seqNo = getNextInvoiceSeqNo()
-    const invoiceNumber = `${storeNum}-${terminalNum}-${seqNo.toString().padStart(6, '0')}`
+    const invoiceNumber = `${storeNum}-${terminalNum}-${dateStr}-${seqNo.toString().padStart(6, '0')}`
     
     console.log('🧾 Generated invoice number:', invoiceNumber, {
       store: storeNum,
       terminal: terminalNum,
+      date: dateStr,
       sequence: seqNo
     })
     
@@ -934,7 +960,7 @@ const OrderPage = () => {
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50 overflow-x-hidden">
       <Sidebar />
-      
+
       {/* Mobile-first responsive container */}
       <div className="flex-1 flex flex-col lg:flex-row min-w-0">
         {/* Main Content */}
@@ -943,43 +969,69 @@ const OrderPage = () => {
           {isDraftContinuation && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center">
-                <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg
+                  className="w-5 h-5 text-blue-600 mr-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
                 <p className="text-blue-800 text-sm font-medium">
-                  Continuing from draft invoice. Complete payment to generate final invoice with invoice number.
+                  Continuing from draft invoice. Complete payment to generate
+                  final invoice with invoice number.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Mobile-responsive Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4 lg:mb-6 gap-3 sm:gap-4">
-            <div className="flex-1 min-w-0">
-              <SearchBar onItemSelect={handleAddItemFromSearch} onCustomerSelect={handleCustomerSelect} resetTrigger={resetTrigger} />
-            </div>
-            
-            {/* Date/Time - responsive display */}
-            <div className="flex items-center justify-center sm:justify-end space-x-2 text-black bg-white px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0">
-              <Calendar size={18} className="text-gray-600" />
-              <span className="text-xs sm:text-sm font-medium">
-                {mounted ? currentDateTime : 'Loading...'}
-              </span>
-            </div>
-            
-            {/* POS Data Status Indicator */}
-            {!posDataLoaded && (
-              <div className="flex items-center justify-center space-x-2 text-orange-600 bg-orange-50 px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0">
-                <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
-                <span className="text-xs sm:text-sm font-medium">Loading Prices...</span>
+          {/* Modular Header Layout */}
+          <div className="space-y-3 mb-3 sm:mb-4 lg:mb-6">
+            {/* First Row: Customer Search (S2) and Status Indicators */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+              {/* DateTime - First on mobile, auto-positioned on larger screens */}
+              <DateTime className="flex-shrink-0 order-1 sm:order-2 sm:ml-auto" />
+
+              {/* POS Data Status Indicators - Second on mobile, third on larger screens */}
+              {!posDataLoaded && (
+                <div className="flex items-center justify-center space-x-2 text-orange-600 bg-orange-50 px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0 order-2 sm:order-3 w-full sm:w-auto">
+                  <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-xs sm:text-sm font-medium">
+                    Loading Prices...
+                  </span>
+                </div>
+              )}
+
+              {posLoadError && (
+                <div className="flex items-center justify-center space-x-2 text-red-600 bg-red-50 px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0 order-2 sm:order-3 w-full sm:w-auto">
+                  <span className="text-xs sm:text-sm font-medium">
+                    Price Error!
+                  </span>
+                </div>
+              )}
+
+              {/* Customer Search - Last on mobile (so it's right above Product Search), first on larger screens */}
+              <div className="flex-shrink-0 w-full sm:w-64 md:w-80 order-3 sm:order-1">
+                <CustomerSearch
+                  onCustomerSelect={handleCustomerSelect}
+                  resetTrigger={resetTrigger}
+                  className="w-full"
+                />
               </div>
-            )}
-            
-            {posLoadError && (
-              <div className="flex items-center justify-center space-x-2 text-red-600 bg-red-50 px-2 sm:px-3 py-2 rounded-lg shadow-sm flex-shrink-0">
-                <span className="text-xs sm:text-sm font-medium">Price Error!</span>
-              </div>
-            )}
+            </div>
+
+            {/* Second Row: Product Search (S1) - Full Width */}
+            <div className="w-full">
+              <ProductSearch
+                onItemSelect={handleAddItemFromSearch}
+                className="w-full"
+              />
+            </div>
           </div>
 
           {/* Order Details */}
@@ -992,16 +1044,31 @@ const OrderPage = () => {
                       <>
                         {isDraftContinuation ? (
                           <>
-                            <span className="hidden sm:inline text-yellow-600">DRAFT INVOICE - NO INVOICE NUMBER YET</span>
-                            <span className="sm:hidden text-yellow-600">DRAFT</span>
+                            <span className="hidden sm:inline text-yellow-600">
+                              DRAFT INVOICE - NO INVOICE NUMBER YET
+                            </span>
+                            <span className="sm:hidden text-yellow-600">
+                              DRAFT
+                            </span>
                           </>
                         ) : (
                           (() => {
                             // Preview the next invoice number that will be generated
-                            const { storeNum, terminalNum } = getStoreTerminalInfo()
-                            const nextSeq = getNextInvoiceSeqNo()
-                            const previewInvoiceNumber = `${storeNum}-${terminalNum}-${nextSeq.toString().padStart(6, '0')}`
+                            const { storeNum, terminalNum } =
+                              getStoreTerminalInfo();
+                            const nextSeq = getNextInvoiceSeqNo();
                             
+                            // Generate date string in DDMMYY format for preview
+                            const now = new Date();
+                            const year = now.getFullYear().toString().slice(-2);
+                            const month = (now.getMonth() + 1).toString().padStart(2, '0');
+                            const day = now.getDate().toString().padStart(2, '0');
+                            const dateStr = `${day}${month}${year}`;
+                            
+                            const previewInvoiceNumber = `${storeNum}-${terminalNum}-${dateStr}-${nextSeq
+                              .toString()
+                              .padStart(6, "0")}`;
+
                             return (
                               <>
                                 <span className="hidden sm:inline">
@@ -1011,65 +1078,85 @@ const OrderPage = () => {
                                   {`NEXT: ${previewInvoiceNumber}`}
                                 </span>
                               </>
-                            )
+                            );
                           })()
                         )}
                       </>
                     ) : (
-                      'INVOICE #: Loading...'
+                      "INVOICE #: Loading..."
                     )}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Order Items Table - responsive */}
+            {/* Order Items Table - responsive with fixed header and scrollable body */}
             <div className="p-2 sm:p-4 lg:p-6">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[400px] sm:min-w-[500px]">
+                {/* Fixed Header */}
+                <table className="w-full min-w-[400px] sm:min-w-[500px] table-fixed">
                   <thead>
                     <tr className="bg-gray-50">
-                      <th className="text-left py-2 lg:py-3 px-2 lg:px-4 font-semibold text-black text-xs lg:text-sm">ITEM</th>
-                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm">RATE</th>
-                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm">QTY</th>
-                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm">AMOUNT</th>
-                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm w-10"></th>
+                      <th className="text-left py-2 lg:py-3 px-2 lg:px-4 font-semibold text-black text-xs lg:text-sm w-[40%]">
+                        ITEM
+                      </th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm w-[15%]">
+                        RATE
+                      </th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm w-[15%]">
+                        QTY
+                      </th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm w-[20%]">
+                        AMOUNT
+                      </th>
+                      <th className="text-center py-2 lg:py-3 px-1 lg:px-4 font-semibold text-black text-xs lg:text-sm w-[10%]"></th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {orderItems.length > 0 ? (
-                      orderItems.map((item) => (
-                        <OrderItem
-                          key={item.id}
-                          item={item}
-                          onRemove={handleRemoveItem}
-                          onQuantityChange={handleQuantityChange}
-                          onRateChange={handleRateChange}
-                          enableRateChange={posPermissions?.enableRateChange ?? false}
-                        />
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-gray-500 text-sm">
-                          No items in order. Search and add products above.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
                 </table>
+                
+                {/* Scrollable Body - Max 8 items visible (approx 400px = 8 rows * ~50px each) */}
+                <div className="max-h-[560px] overflow-y-auto border-t border-gray-200 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-100">
+                  <table className="w-full min-w-[400px] sm:min-w-[500px] table-fixed">
+                    <tbody>
+                      {orderItems.length > 0 ? (
+                        orderItems.map((item) => (
+                          <OrderItem
+                            key={item.id}
+                            item={item}
+                            onRemove={handleRemoveItem}
+                            onQuantityChange={handleQuantityChange}
+                            onRateChange={handleRateChange}
+                            enableRateChange={
+                              posPermissions?.enableRateChange ?? false
+                            }
+                          />
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="py-8 text-center text-gray-500 text-sm"
+                          >
+                            No items in order. Search and add products above.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Action Buttons - mobile responsive */}
           <div className="flex justify-center mt-3 sm:mt-4 lg:mt-6">
-            <button 
+            <button
               onClick={() => {
-                setOrderItems([])
-                setCashReceived('0')
-                setSelectedDiscount(0)
-                setSelectedCustomer('')
-                setResetTrigger(prev => prev + 1)
+                setOrderItems([]);
+                setCashReceived("0");
+                setSelectedDiscount(0);
+                setSelectedCustomer("");
+                setResetTrigger((prev) => prev + 1);
               }}
               className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 sm:py-3 px-4 sm:px-6 lg:px-8 rounded-lg text-sm lg:text-base"
             >
@@ -1082,19 +1169,21 @@ const OrderPage = () => {
         <div className="w-full lg:w-80 bg-white border-t lg:border-t-0 lg:border-l border-gray-200 p-3 sm:p-4 lg:p-6">
           {/* Total Payable Amount */}
           <div className="mb-3 sm:mb-4 lg:mb-6 text-center">
-            <div className="text-sm sm:text-base lg:text-lg font-semibold text-black mb-2">TOTAL PAYABLE AMOUNT</div>
-            <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-orange-500">{subtotal.toFixed(2)}</div>
+            <div className="text-sm sm:text-base lg:text-lg font-semibold text-black mb-2">
+              PAYMENTS & SUBMISSION
+            </div>
           </div>
 
           {/* Mobile layout - vertical sections */}
           <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6">
-            
             {/* Discount Section - Conditional based on POS Profile permissions */}
             {posPermissions?.enableCustomerDiscount ? (
               <div>
                 <div className="flex items-center mb-2 sm:mb-3">
                   <Banknote size={20} className="text-gray-600 mr-2" />
-                  <h3 className="font-semibold text-black text-sm lg:text-base">DISCOUNT</h3>
+                  <h3 className="font-semibold text-black text-sm lg:text-base">
+                    DISCOUNT
+                  </h3>
                 </div>
                 <input
                   type="number"
@@ -1108,7 +1197,9 @@ const OrderPage = () => {
               <div>
                 <div className="flex items-center mb-2 sm:mb-3">
                   <Banknote size={20} className="text-gray-400 mr-2" />
-                  <h3 className="font-semibold text-gray-400 text-sm lg:text-base">DISCOUNT (Not Permitted)</h3>
+                  <h3 className="font-semibold text-gray-400 text-sm lg:text-base">
+                    DISCOUNT (Not Permitted)
+                  </h3>
                 </div>
                 <input
                   type="number"
@@ -1124,26 +1215,28 @@ const OrderPage = () => {
             <div>
               <div className="flex items-center mb-2 sm:mb-3">
                 <CreditCard size={20} className="text-gray-600 mr-2" />
-                <h3 className="font-semibold text-black text-sm lg:text-base">TRANSACTION METHOD</h3>
+                <h3 className="font-semibold text-black text-sm lg:text-base">
+                  PAYMENT METHOD
+                </h3>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button 
-                  onClick={() => setSelectedPaymentMethod('Cash')}
+                <button
+                  onClick={() => setSelectedPaymentMethod("Cash")}
                   className={`py-2 lg:py-3 px-2 sm:px-3 lg:px-4 rounded text-xs lg:text-sm font-medium flex items-center justify-center space-x-1 lg:space-x-2 ${
-                    selectedPaymentMethod === 'Cash'
-                      ? 'bg-gray-800 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    selectedPaymentMethod === "Cash"
+                      ? "bg-gray-800 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
                   }`}
                 >
                   <Banknote size={16} />
                   <span>CASH</span>
                 </button>
-                <button 
-                  onClick={() => setSelectedPaymentMethod('Card')}
+                <button
+                  onClick={() => setSelectedPaymentMethod("Card")}
                   className={`py-2 lg:py-3 px-2 sm:px-3 lg:px-4 rounded text-xs lg:text-sm font-medium hover:bg-gray-300 flex items-center justify-center space-x-1 lg:space-x-2 ${
-                    selectedPaymentMethod === 'Card'
-                      ? 'bg-gray-800 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    selectedPaymentMethod === "Card"
+                      ? "bg-gray-800 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
                   }`}
                 >
                   <CreditCard size={16} />
@@ -1154,9 +1247,11 @@ const OrderPage = () => {
           </div>
 
           {/* Cash Received */}
-          {selectedPaymentMethod === 'Cash' && (
+          
             <div className="mb-3 sm:mb-4 lg:mb-6 mt-3 sm:mt-4 lg:mt-0">
-              <label className="block text-sm font-medium text-black my-2">ADD CASH RECEIVED</label>
+              <label className="block text-sm font-medium text-black my-2">
+                AMOUNT RECEIVED
+              </label>
               <div className="relative">
                 <input
                   type="number"
@@ -1166,7 +1261,6 @@ const OrderPage = () => {
                 />
               </div>
             </div>
-          )}
 
           {/* Payment Summary */}
           <div className="space-y-2 mb-3 sm:mb-4 lg:mb-6 bg-gray-50 p-3 lg:p-4 rounded-lg">
@@ -1185,7 +1279,7 @@ const OrderPage = () => {
             <div className="border-t border-gray-300 pt-3 mt-3">
               <div className="flex justify-between text-base sm:text-lg lg:text-xl font-bold text-black">
                 <span>GRAND TOTAL</span>
-                <span>{total.toFixed(2)}</span>
+                <span className="text-orange-500">{total.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -1194,50 +1288,82 @@ const OrderPage = () => {
           <button
             onClick={handleSubmit}
             disabled={
-              orderItems.length === 0 || 
-              !selectedCustomer || 
-              orderItems.some(item => item.price < 0) ||
-              syncStatus === 'syncing'
+              orderItems.length === 0 ||
+              !selectedCustomer ||
+              orderItems.some((item) => item.price < 0) ||
+              syncStatus === "syncing"
             }
             className="w-full bg-teal-600 hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold py-3 lg:py-4 rounded-lg text-sm sm:text-base lg:text-lg transition-colors"
           >
-            {syncStatus === 'syncing' ? (
+            {syncStatus === "syncing" ? (
               <span className="flex items-center justify-center space-x-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 <span className="text-sm lg:text-base">SAVING...</span>
               </span>
             ) : orderItems.length === 0 ? (
-              'ADD ITEMS TO SUBMIT'
+              "ADD ITEMS TO SUBMIT"
             ) : !selectedCustomer ? (
-              'SELECT CUSTOMER TO SUBMIT'
-            ) : orderItems.some(item => item.price < 0) ? (
-              'ITEMS HAVE NEGATIVE PRICES'
+              "SELECT CUSTOMER TO SUBMIT"
+            ) : orderItems.some((item) => item.price < 0) ? (
+              "ITEMS HAVE NEGATIVE PRICES"
             ) : (
-              'REVIEW ORDER'
+              "REVIEW ORDER"
             )}
           </button>
 
           {/* Validation Messages - Mobile Responsive */}
-          {(orderItems.length === 0 || !selectedCustomer || orderItems.some(item => item.price <= 0)) && (
+          {(orderItems.length === 0 ||
+            !selectedCustomer ||
+            orderItems.some((item) => item.price <= 0)) && (
             <div className="mt-3 text-center">
               <div className="text-xs lg:text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
-                <p className="font-medium mb-2">To submit this order, please ensure:</p>
+                <p className="font-medium mb-2">
+                  To submit this order, please ensure:
+                </p>
                 <ul className="text-left space-y-1">
-                  <li className={`flex items-start lg:items-center ${orderItems.length > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    <span className="mr-2 mt-0.5 lg:mt-0">{orderItems.length > 0 ? '✓' : '✗'}</span>
-                    <span className="text-xs lg:text-sm">Add at least one item to the order</span>
+                  <li
+                    className={`flex items-start lg:items-center ${
+                      orderItems.length > 0 ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
+                    <span className="mr-2 mt-0.5 lg:mt-0">
+                      {orderItems.length > 0 ? "✓" : "✗"}
+                    </span>
+                    <span className="text-xs lg:text-sm">
+                      Add at least one item to the order
+                    </span>
                   </li>
-                  <li className={`flex items-start lg:items-center ${selectedCustomer ? 'text-green-600' : 'text-red-600'}`}>
-                    <span className="mr-2 mt-0.5 lg:mt-0">{selectedCustomer ? '✓' : '✗'}</span>
-                    <span className="text-xs lg:text-sm">Select a customer (required)</span>
+                  <li
+                    className={`flex items-start lg:items-center ${
+                      selectedCustomer ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
+                    <span className="mr-2 mt-0.5 lg:mt-0">
+                      {selectedCustomer ? "✓" : "✗"}
+                    </span>
+                    <span className="text-xs lg:text-sm">
+                      Select a customer (required)
+                    </span>
                   </li>
-                  <li className={`flex items-start lg:items-center ${!orderItems.some(item => item.price < 0) ? 'text-green-600' : 'text-red-600'}`}>
-                    <span className="mr-2 mt-0.5 lg:mt-0">{!orderItems.some(item => item.price < 0) ? '✓' : '✗'}</span>
+                  <li
+                    className={`flex items-start lg:items-center ${
+                      !orderItems.some((item) => item.price < 0)
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    <span className="mr-2 mt-0.5 lg:mt-0">
+                      {!orderItems.some((item) => item.price < 0) ? "✓" : "✗"}
+                    </span>
                     <div className="text-xs lg:text-sm">
                       <span>All items have valid prices (≥ 0)</span>
-                      {orderItems.some(item => item.price < 0) && (
+                      {orderItems.some((item) => item.price < 0) && (
                         <div className="text-xs text-red-500 mt-1">
-                          Items with negative prices: {orderItems.filter(item => item.price < 0).map(item => item.name).join(', ')}
+                          Items with negative prices:{" "}
+                          {orderItems
+                            .filter((item) => item.price < 0)
+                            .map((item) => item.name)
+                            .join(", ")}
                         </div>
                       )}
                     </div>
@@ -1255,39 +1381,43 @@ const OrderPage = () => {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900">Confirm Order</h2>
-                <button 
+                <h2 className="text-xl font-bold text-gray-900">
+                  Confirm Order
+                </h2>
+                <button
                   onClick={() => setShowConfirmDialog(false)}
                   className="text-gray-400 hover:text-gray-600"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
 
               {/* Customer Info */}
               <div className="mb-4 p-3 bg-gray-50 rounded">
-                <p className="text-sm text-gray-600">Customer: <span className="font-semibold text-gray-900">{selectedCustomer}</span></p>
-                <p className="text-sm text-gray-600">Payment: <span className="font-semibold text-gray-900">{selectedPaymentMethod}</span></p>
-              </div>
-
-              {/* Order Items */}
-              <div className="mb-4">
-                <h3 className="font-semibold text-gray-900 mb-2">Order Items:</h3>
-                <div className="border rounded overflow-hidden">
-                  {orderItems.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center p-2 border-b last:border-b-0 bg-white">
-                      <div className="flex-1">
-                        <p className="font-medium text-sm text-gray-900">{item.name}</p>
-                        <p className="text-xs text-gray-600">{item.price.toFixed(2)} × {item.quantity}</p>
-                      </div>
-                      <div className="text-sm font-semibold text-gray-900">
-                        {item.subtotal.toFixed(2)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-sm text-gray-600">
+                  Customer:{" "}
+                  <span className="font-semibold text-gray-900">
+                    {selectedCustomer}
+                  </span>
+                </p>
+                <p className="text-sm text-gray-600">
+                  Payment:{" "}
+                  <span className="font-semibold text-gray-900">
+                    {selectedPaymentMethod}
+                  </span>
+                </p>
               </div>
 
               {/* Order Summary */}
@@ -1299,18 +1429,22 @@ const OrderPage = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">VAT (15%):</span>
-                    <span className="text-gray-900">{vatAmount.toFixed(2)}</span>
+                    <span className="text-gray-900">
+                      {vatAmount.toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Discount:</span>
-                    <span className="text-gray-900">-{discountAmount.toFixed(2)}</span>
+                    <span className="text-gray-900">
+                      -{discountAmount.toFixed(2)}
+                    </span>
                   </div>
                   <hr className="my-2" />
                   <div className="flex justify-between text-lg font-bold">
                     <span className="text-gray-900">Grand Total:</span>
                     <span className="text-gray-900">{total.toFixed(2)}</span>
                   </div>
-                  {selectedPaymentMethod === 'Cash' && (
+                  {selectedPaymentMethod === "Cash" && (
                     <>
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-600">Cash Received:</span>
@@ -1318,7 +1452,9 @@ const OrderPage = () => {
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-600">Change:</span>
-                        <span className="text-gray-900">{(parseFloat(cashReceived) - total).toFixed(2)}</span>
+                        <span className="text-gray-900">
+                          {(parseFloat(cashReceived) - total).toFixed(2)}
+                        </span>
                       </div>
                     </>
                   )}
@@ -1335,24 +1471,36 @@ const OrderPage = () => {
                 </button>
                 <button
                   onClick={handleSaveDraft}
-                  disabled={syncStatus === 'syncing'}
+                  disabled={syncStatus === "syncing"}
                   className="px-3 lg:px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Update Draft' : 'Save as Draft'}
+                  {syncStatus === "syncing"
+                    ? "Saving..."
+                    : isDraftContinuation
+                    ? "Update Draft"
+                    : "Save as Draft"}
                 </button>
                 <button
                   onClick={handleConfirmOrder}
-                  disabled={syncStatus === 'syncing'}
+                  disabled={syncStatus === "syncing"}
                   className="px-3 lg:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Pay & Generate Invoice' : 'Submit'}
+                  {syncStatus === "syncing"
+                    ? "Saving..."
+                    : isDraftContinuation
+                    ? "Pay & Generate Invoice"
+                    : "Submit"}
                 </button>
                 <button
                   onClick={handleConfirmAndPrint}
-                  disabled={syncStatus === 'syncing'}
+                  disabled={syncStatus === "syncing"}
                   className="px-3 lg:px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-400 text-sm lg:text-base"
                 >
-                  {syncStatus === 'syncing' ? 'Saving...' : isDraftContinuation ? 'Pay & Print Invoice' : 'Submit & Print'}
+                  {syncStatus === "syncing"
+                    ? "Saving..."
+                    : isDraftContinuation
+                    ? "Pay & Print Invoice"
+                    : "Submit & Print"}
                 </button>
               </div>
             </div>
@@ -1362,41 +1510,85 @@ const OrderPage = () => {
 
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed bottom-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 ${
-          toast.type === 'success' ? 'bg-green-500' :
-          toast.type === 'error' ? 'bg-red-500' :
-          'bg-blue-500'
-        }`}>
+        <div
+          className={`fixed bottom-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg text-white font-medium transition-all duration-300 ${
+            toast.type === "success"
+              ? "bg-green-500"
+              : toast.type === "error"
+              ? "bg-red-500"
+              : "bg-blue-500"
+          }`}
+        >
           <div className="flex items-center space-x-2">
-            {toast.type === 'success' && (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            {toast.type === "success" && (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
             )}
-            {toast.type === 'error' && (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            {toast.type === "error" && (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             )}
-            {toast.type === 'info' && (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            {toast.type === "info" && (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             )}
             <span>{toast.message}</span>
-            <button 
+            <button
               onClick={() => setToast(null)}
               className="ml-2 text-white hover:text-gray-200"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
         </div>
       )}
     </div>
-  )
+  );
 }
 
 export default OrderPage

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Calendar, User, TrendingUp, CreditCard, Eye, Clock, Printer, Package, FileText, Edit3 } from 'lucide-react'
 import Sidebar from '../../components/Sidebar'
 import { localDB, remoteDB } from '@/lib/pouchdb'
@@ -59,68 +59,83 @@ const InvoicesPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
 
-  // Load invoices from PouchDB and drafts from localStorage
+  // Optimized invoice loading with efficient queries
   const loadInvoices = async () => {
-    console.log('DEBUG: Starting to load invoices...')
-
     try {
-      // Load submitted invoices from localDB
+      setLoading(true)
       let submittedInvoices: POSInvoice[] = []
       
       if (localDB) {
-        console.log('DEBUG: Loading submitted invoices from localDB...')
-        
-        const allDocs = await localDB.allDocs({ include_docs: true })
-        console.log('DEBUG: Total documents in DB:', allDocs.rows.length)
-        
-        const allPOSInvoices = allDocs.rows
-          .map((row: any) => row.doc)
-          .filter((doc: any) => doc && doc.type === 'POSInvoice')
-        
-        console.log('DEBUG: All POSInvoice documents in DB:', allPOSInvoices.map(doc => ({
-          id: doc._id,
-          type: doc.type,
-          status: doc.status,
-          CreatedBy: doc.CreatedBy,
-          customer: doc.customer_id?.split('::').pop()
-        })))
-        
-        // Filter for submitted invoices only (not drafts)
-        submittedInvoices = allPOSInvoices.filter((doc: any) => 
-          doc && doc.type === 'POSInvoice' && doc.CreatedBy === 'POS_USER' && doc.status !== 'Draft'
-        ) as POSInvoice[]
-        
-        console.log('DEBUG: Submitted invoices from localDB:', submittedInvoices.length)
-      } else {
-        console.log('DEBUG: LocalDB not available, skipping database invoices')
+        // Efficient query using PouchDB find with index
+        try {
+          // Create index if it doesn't exist (one-time operation)
+          await localDB.createIndex({
+            index: { fields: ['type', 'CreatedBy', 'status'] }
+          })
+          
+          // Query only POSInvoice documents efficiently
+          const result = await localDB.find({
+            selector: {
+              type: 'POSInvoice',
+              CreatedBy: 'POS_USER',
+              status: { $ne: 'Draft' }
+            },
+            sort: [{ type: 'asc' }],
+            limit: 500 // Limit to prevent huge queries
+          })
+          
+          submittedInvoices = result.docs as POSInvoice[]
+        } catch (indexError) {
+          console.warn('Index creation failed, falling back to basic query:', indexError)
+          
+          // Fallback: Use allDocs with startkey/endkey for POSInvoice documents
+          const result = await localDB.allDocs({
+            include_docs: true,
+            startkey: 'POSInvoice::',
+            endkey: 'POSInvoice::\ufff0'
+          })
+          
+          submittedInvoices = result.rows
+            .map(row => row.doc)
+            .filter((doc: any) => 
+              doc && doc.type === 'POSInvoice' && 
+              doc.CreatedBy === 'POS_USER' && 
+              doc.status !== 'Draft'
+            ) as POSInvoice[]
+        }
       }
 
-      // Load draft invoices from localStorage
-      console.log('DEBUG: Loading draft invoices from localStorage...')
+      // Load draft invoices from localStorage (fast operation)
       let draftInvoices: POSInvoice[] = []
-      
       try {
         const draftsJson = localStorage.getItem('draftInvoices')
         if (draftsJson) {
           draftInvoices = JSON.parse(draftsJson) as POSInvoice[]
-          console.log('DEBUG: Draft invoices from localStorage:', draftInvoices.length)
-        } else {
-          console.log('DEBUG: No draft invoices found in localStorage')
         }
       } catch (storageError) {
-        console.error('DEBUG: Error loading drafts from localStorage:', storageError)
-        // Continue without drafts if storage fails
+        console.warn('Error loading drafts from localStorage:', storageError)
       }
 
-      // Combine submitted invoices from DB and draft invoices from localStorage
+      // Combine and sort efficiently
       const combinedInvoices = [...submittedInvoices, ...draftInvoices]
-      console.log('DEBUG: Combined invoices total:', combinedInvoices.length, {
-        submitted: submittedInvoices.length,
-        drafts: draftInvoices.length
-      })
-
-      // Sort by creation date (most recent first)
-      combinedInvoices.sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
+      
+      // Use requestIdleCallback for non-blocking sort if available
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        await new Promise<void>((resolve) => {
+          (window as any).requestIdleCallback(() => {
+            combinedInvoices.sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
+            resolve()
+          })
+        })
+      } else {
+        // Fallback: Use setTimeout to avoid blocking
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            combinedInvoices.sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
+            resolve()
+          }, 0)
+        })
+      }
       
       setInvoices(combinedInvoices)
       setError(null)
@@ -134,14 +149,24 @@ const InvoicesPage = () => {
   }
 
   useEffect(() => {
-    const initializePage = async () => {
-      setLoading(true)
-      await loadInvoices()
-      setLoading(false)
-    }
-
-    initializePage()
+    // Load invoices when component mounts
+    loadInvoices()
   }, [])
+
+  // Memoized calculations for better performance
+  const statistics = useMemo(() => {
+    const totalRevenue = invoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0)
+    const uniqueCustomers = new Set(invoices.map(inv => inv.customer_id?.split('::').pop() || 'Unknown')).size
+    const todaysOrders = invoices.filter(inv => 
+      new Date(inv.creation_date).toDateString() === new Date().toDateString()
+    ).length
+
+    return {
+      totalRevenue,
+      uniqueCustomers,
+      todaysOrders
+    }
+  }, [invoices])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -469,7 +494,7 @@ const InvoicesPage = () => {
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Total Revenue</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
-                      {formatCurrency(invoices.filter(inv => inv.status === 'Submitted').reduce((sum, inv) => sum + inv.total_amount, 0))}
+                      {formatCurrency(statistics.totalRevenue)}
                     </p>
                   </div>
                 </div>
@@ -481,7 +506,7 @@ const InvoicesPage = () => {
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Unique Customers</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
-                      {new Set(invoices.map(inv => inv.customer_id?.split('::').pop() || 'Unknown')).size}
+                      {statistics.uniqueCustomers}
                     </p>
                   </div>
                 </div>
@@ -493,9 +518,7 @@ const InvoicesPage = () => {
                   <div className="min-w-0">
                     <p className="text-xs sm:text-sm text-gray-600">Today's Orders</p>
                     <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">
-                      {invoices.filter(inv => 
-                        new Date(inv.creation_date).toDateString() === new Date().toDateString()
-                      ).length}
+                      {statistics.todaysOrders}
                     </p>
                   </div>
                 </div>

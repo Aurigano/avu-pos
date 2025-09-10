@@ -1,6 +1,7 @@
 // API Service - Centralized API calls for the POS system
 
 // Base API configuration
+// const API_BASE_URL = 'https://retailerp.etoserp.com/api/method'
 const API_BASE_URL = 'https://demo15.etoserp.com/api/method'
 
 // API Response Types

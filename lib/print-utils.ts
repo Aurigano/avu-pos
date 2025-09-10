@@ -322,7 +322,11 @@ export const printInvoiceReceipt = async (invoice: InvoiceData) => {
 
             <!-- Order Header -->
             <div style="margin-bottom: 10px;">
-              <div style="font-size: 14px; font-weight: bold;">Order #${invoice.erpnext_id?.split('-').pop() || invoice._id.slice(-3)}</div>
+              <div style="font-size: 14px; font-weight: bold;">Order #${(() => {
+                const invoiceId = invoice.erpnext_id || invoice._id
+                const numbers = invoiceId.match(/\d+/g)
+                return numbers ? numbers.join('') : invoiceId.slice(-3)
+              })()}</div>
               <div style="font-size: 10px;">${formattedDate}        ${formattedTime}</div>
               <div style="font-size: 10px;">Host: ${invoice.cashier_id || 'POS User'}</div>
               <div style="font-size: 10px;">Customer: ${invoice.customer_id?.split('::').pop() || 'Unknown'}</div>

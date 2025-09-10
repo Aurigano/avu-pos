@@ -37,9 +37,9 @@ const OrderItem = ({ item, onRemove, onQuantityChange, onRateChange, enableRateC
 
   return (
     <tr className="border-b border-gray-100">
-      <td className="py-2 lg:py-3 px-2 lg:px-4">
+      <td className="py-2 lg:py-3 px-2 lg:px-4 w-[40%]">
         <div className="flex items-center space-x-2 lg:space-x-3">
-          {item.image ? (
+          {/* {item.image ? (
             <img 
               src={item.image} 
               alt={item.name}
@@ -53,14 +53,14 @@ const OrderItem = ({ item, onRemove, onQuantityChange, onRateChange, enableRateC
             <div className="w-8 h-8 lg:w-10 lg:h-10 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
               <span className="text-xs text-gray-400">IMG</span>
             </div>
-          )}
+          )} */}
           <div className="min-w-0 flex-1">
             <div className="font-medium text-black text-sm lg:text-base truncate">{item.name}</div>
             <div className="text-xs lg:text-sm text-gray-600 truncate">({item.category})</div>
           </div>
         </div>
       </td>
-      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
+      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center w-[15%]">
         {enableRateChange ? (
           <input
             type="number"
@@ -80,7 +80,7 @@ const OrderItem = ({ item, onRemove, onQuantityChange, onRateChange, enableRateC
           <div className="text-xs text-blue-500 mt-1">✏️ Editable</div>
         )} */}
       </td>
-      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
+      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center w-[15%]">
         <div className="flex items-center justify-center space-x-1 lg:space-x-2">
           <button
             onClick={handleQuantityDecrease}
@@ -104,10 +104,10 @@ const OrderItem = ({ item, onRemove, onQuantityChange, onRateChange, enableRateC
           </button>
         </div>
       </td>
-      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center font-medium text-black text-sm lg:text-base">
+      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center font-medium text-black text-sm lg:text-base w-[20%]">
         {item.subtotal.toFixed(2)}
       </td>
-      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center">
+      <td className="py-2 lg:py-3 px-1 lg:px-4 text-center w-[10%]">
         <button
           onClick={() => onRemove(item.id)}
           className="text-red-500 hover:text-red-700 p-1"

@@ -12,13 +12,13 @@ let isInitialized = false;
 // Initialize databases
 function initializeDatabases(config) {
   try {
-    localDB = new PouchDB('local_posdb');
+    localDB = new PouchDB('local_retailpos');
     
     if (config.remoteUrl && config.username && config.password) {
-      const authUrl = `${config.remoteUrl.replace('://', `://${config.username}:${config.password}@`)}posdb`;
+      const authUrl = `${config.remoteUrl.replace('://', `://${config.username}:${config.password}@`)}retailpos`;
       remoteDB = new PouchDB(authUrl);
     } else if (config.remoteUrl) {
-      remoteDB = new PouchDB(`${config.remoteUrl}posdb`);
+      remoteDB = new PouchDB(`${config.remoteUrl}retailpos`);
     }
     
     isInitialized = true;
