@@ -34,6 +34,7 @@ const CustomerSearch: React.FC<CustomerSearchProps> = ({ onCustomerSelect, reset
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([])
   const [allCustomers, setAllCustomers] = useState<Customer[]>([])
+  const [selectedCustomerIndex, setSelectedCustomerIndex] = useState(-1)
   const customerSearchRef = useRef<HTMLDivElement>(null)
 
   // Load customers from database
@@ -93,6 +94,36 @@ const CustomerSearch: React.FC<CustomerSearchProps> = ({ onCustomerSelect, reset
     
     setFilteredCustomers(filtered)
     setShowCustomerDropdown(filtered.length > 0)
+    setSelectedCustomerIndex(-1) // Reset selection when search changes
+  }
+
+  const handleCustomerKeyDown = (e: React.KeyboardEvent) => {
+    if (!showCustomerDropdown || filteredCustomers.length === 0) return
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setSelectedCustomerIndex(prev => 
+          prev < filteredCustomers.length - 1 ? prev + 1 : 0
+        )
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setSelectedCustomerIndex(prev => 
+          prev > 0 ? prev - 1 : filteredCustomers.length - 1
+        )
+        break
+      case 'Enter':
+        e.preventDefault()
+        if (selectedCustomerIndex >= 0 && selectedCustomerIndex < filteredCustomers.length) {
+          handleCustomerSelect(filteredCustomers[selectedCustomerIndex])
+        }
+        break
+      case 'Escape':
+        setShowCustomerDropdown(false)
+        setSelectedCustomerIndex(-1)
+        break
+    }
   }
 
   const handleCustomerSelect = (customer: Customer) => {
@@ -109,6 +140,7 @@ const CustomerSearch: React.FC<CustomerSearchProps> = ({ onCustomerSelect, reset
         placeholder="Customer search..."
         value={customerSearchTerm}
         onChange={(e) => handleCustomerInputChange(e.target.value)}
+        onKeyDown={handleCustomerKeyDown}
         onFocus={() => {
           // Show suggestions immediately on focus
           const filtered = customerSearchTerm.length > 0
@@ -123,17 +155,22 @@ const CustomerSearch: React.FC<CustomerSearchProps> = ({ onCustomerSelect, reset
           
           setFilteredCustomers(filtered)
           setShowCustomerDropdown(filtered.length > 0)
+          setSelectedCustomerIndex(-1) // Reset selection when focusing
         }}
         className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-green-500 text-black"
       />
       
       {showCustomerDropdown && (
         <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
-          {filteredCustomers.map((customer: Customer) => (
+          {filteredCustomers.map((customer: Customer, index: number) => (
             <div
               key={customer._id}
               onClick={() => handleCustomerSelect(customer)}
-              className="px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+              className={`px-4 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                index === selectedCustomerIndex 
+                  ? 'bg-green-100 text-green-900' 
+                  : 'hover:bg-gray-50'
+              }`}
             >
               <div className="flex items-center">
                 <User size={16} className="text-gray-400 mr-2 flex-shrink-0" />

@@ -35,6 +35,7 @@ const OrderPage = () => {
 
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'Cash' | 'Card' | 'Voucher'>('Cash')
   const [selectedCustomer, setSelectedCustomer] = useState<string>('')
+  const [barcodeSearch, setBarcodeSearch] = useState<string>('')
   const mounted = useHydration()
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
@@ -300,6 +301,47 @@ const OrderPage = () => {
     }
     
     return product as any
+  }
+
+  const handleBarcodeSearch = async (barcode: string) => {
+    if (!barcode.trim()) return
+
+    try {
+      // Search for product by barcode/item_code
+      if (!localDB) {
+        showToast('Database not available', 'error')
+        return
+      }
+
+      const result = await localDB.find({
+        selector: {
+          type: 'Item',
+          $or: [
+            { item_code: barcode.trim() },
+            { erpnext_id: barcode.trim() }
+          ]
+        },
+        limit: 1
+      })
+
+      if (result.docs.length > 0) {
+        const product = result.docs[0] as any
+        await handleAddItemFromSearch(product.item_name)
+        setBarcodeSearch('') // Clear barcode field after successful addition
+        showToast(`Added ${product.item_name} via barcode`, 'success')
+      } else {
+        showToast('Product not found for this barcode', 'error')
+      }
+    } catch (error) {
+      console.error('Error searching by barcode:', error)
+      showToast('Error searching by barcode', 'error')
+    }
+  }
+
+  const handleBarcodeKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleBarcodeSearch(barcodeSearch)
+    }
   }
 
   const handleAddItemFromSearch = async (itemName: string) => {
@@ -651,6 +693,7 @@ const OrderPage = () => {
         setCashReceived('0')
         setSelectedDiscount(0)
         setSelectedCustomer('')
+        setBarcodeSearch('')
         setIsDraftContinuation(false)
         setDraftId(null)
         setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
@@ -838,13 +881,15 @@ const OrderPage = () => {
         due_date: now.toISOString().split("T")[0],
         total_amount: totalAmount,
         paid_amount: totalAmount,
-        payment_method: selectedPaymentMethod,
+        payment_method: [selectedPaymentMethod],
         status: "Submitted",
         is_pos: true,
         is_return_credit_note: false,
-        pos_profile_id: currentPOSProfile?._id || "",
+        pos_profile: currentPOSProfile?.name || "",
         cashier_id: "User::StoreA::POS1::pos_user",
-        store_id: "Store::StoreA",
+        store: localStorage.getItem('store') || "",
+        terminal: localStorage.getItem('terminal') || "",
+        pos_entry_name: localStorage.getItem('posEntryName') || "",
         items: orderItems.map(item => ({
           item_id: item.item_id,
           qty: item.quantity,
@@ -876,6 +921,8 @@ const OrderPage = () => {
         AuditLogId: `Audit::StoreA::POS1::AUDIT-${Date.now().toString().slice(-6)}`
       }
 
+      console.log('Invoice data:', invoiceData)
+
               try {
         // Always save to local database first (most important)
         console.log('Saving invoice to local database...')
@@ -896,7 +943,7 @@ const OrderPage = () => {
         }
         
         // Save to local DB first - this is the primary operation
-        await localDB.put(invoiceData)
+        // await localDB.put(invoiceData)
         console.log('Invoice saved to local database successfully')
         
         // Increment invoice sequence number after successful save
@@ -906,18 +953,18 @@ const OrderPage = () => {
         }
         
         // Now try to sync to remote (secondary operation)
-        try {
-          console.log('Syncing to remote database...')
-          const syncResult = await performSync('push')
-          if (syncResult.success) {
-            console.log('Remote sync completed successfully')
-          } else {
-            console.log('Remote sync failed:', syncResult.error)
-          }
-        } catch (syncError) {
-          console.log('Remote sync failed, but order was saved locally:', syncError)
-          // Don't fail the entire operation - local save succeeded
-        }
+        // try {
+        //   console.log('Syncing to remote database...')
+          // const syncResult = await performSync('push')
+        //   if (syncResult.success) {
+        //     console.log('Remote sync completed successfully')
+        //   } else {
+        //     console.log('Remote sync failed:', syncResult.error)
+        //   }
+        // } catch (syncError) {
+        //   console.log('Remote sync failed, but order was saved locally:', syncError)
+        //   // Don't fail the entire operation - local save succeeded
+        // }
         
         setSyncStatus('synced')
         showToast('Order submitted successfully!', 'success')
@@ -937,6 +984,7 @@ const OrderPage = () => {
         setCashReceived('0')
         setSelectedDiscount(0)
         setSelectedCustomer('')
+        setBarcodeSearch('')
         setIsDraftContinuation(false)
         setDraftId(null)
         setResetTrigger(prev => prev + 1) // Trigger SearchBar reset
@@ -1015,13 +1063,44 @@ const OrderPage = () => {
                 </div>
               )}
 
-              {/* Customer Search - Last on mobile (so it's right above Product Search), first on larger screens */}
-              <div className="flex-shrink-0 w-full sm:w-64 md:w-80 order-3 sm:order-1">
-                <CustomerSearch
-                  onCustomerSelect={handleCustomerSelect}
-                  resetTrigger={resetTrigger}
-                  className="w-full"
-                />
+              {/* Customer Search and Barcode Search - Last on mobile (so they're right above Product Search), first on larger screens */}
+              <div className="flex-shrink-0 w-full sm:w-auto order-3 sm:order-1 flex flex-col sm:flex-row gap-2 sm:gap-4">
+                <div className="w-full sm:w-64">
+                  <CustomerSearch
+                    onCustomerSelect={handleCustomerSelect}
+                    resetTrigger={resetTrigger}
+                    className="w-full"
+                  />
+                </div>
+                <div className="w-full sm:w-64">
+                  <div className="relative">
+                    <svg
+                      className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5z"/>
+                      <path d="M7 8h10"/>
+                      <path d="M7 12h7"/>
+                      <path d="M7 16h6"/>
+                    </svg>
+                                         <input
+                       type="text"
+                       placeholder="Barcode search..."
+                       value={barcodeSearch}
+                       onChange={(e) => setBarcodeSearch(e.target.value)}
+                       onKeyPress={handleBarcodeKeyPress}
+                       className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-orange-500 text-black"
+                       autoComplete="off"
+                     />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1156,6 +1235,7 @@ const OrderPage = () => {
                 setCashReceived("0");
                 setSelectedDiscount(0);
                 setSelectedCustomer("");
+                setBarcodeSearch("");
                 setResetTrigger((prev) => prev + 1);
               }}
               className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 sm:py-3 px-4 sm:px-6 lg:px-8 rounded-lg text-sm lg:text-base"

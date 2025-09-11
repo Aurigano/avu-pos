@@ -40,6 +40,7 @@ const ProductSearch: React.FC<ProductSearchProps> = ({ onItemSelect, className =
   const [showProductDropdown, setShowProductDropdown] = useState(false)
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [selectedProductIndex, setSelectedProductIndex] = useState(-1)
   const productSearchRef = useRef<HTMLDivElement>(null)
 
   // Load products from database
@@ -91,6 +92,36 @@ const ProductSearch: React.FC<ProductSearchProps> = ({ onItemSelect, className =
     
     setFilteredProducts(filtered)
     setShowProductDropdown(filtered.length > 0)
+    setSelectedProductIndex(-1) // Reset selection when search changes
+  }
+
+  const handleProductKeyDown = (e: React.KeyboardEvent) => {
+    if (!showProductDropdown || filteredProducts.length === 0) return
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setSelectedProductIndex(prev => 
+          prev < filteredProducts.length - 1 ? prev + 1 : 0
+        )
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setSelectedProductIndex(prev => 
+          prev > 0 ? prev - 1 : filteredProducts.length - 1
+        )
+        break
+      case 'Enter':
+        e.preventDefault()
+        if (selectedProductIndex >= 0 && selectedProductIndex < filteredProducts.length) {
+          handleProductSelect(filteredProducts[selectedProductIndex])
+        }
+        break
+      case 'Escape':
+        setShowProductDropdown(false)
+        setSelectedProductIndex(-1)
+        break
+    }
   }
 
   const handleProductSelect = (product: Product) => {
@@ -108,6 +139,7 @@ const ProductSearch: React.FC<ProductSearchProps> = ({ onItemSelect, className =
         placeholder="Product search..."
         value={productSearchTerm}
         onChange={(e) => handleProductInputChange(e.target.value)}
+        onKeyDown={handleProductKeyDown}
         onFocus={() => {
           // Show suggestions immediately on focus
           const filtered = productSearchTerm.length > 0 
@@ -122,17 +154,22 @@ const ProductSearch: React.FC<ProductSearchProps> = ({ onItemSelect, className =
           
           setFilteredProducts(filtered)
           setShowProductDropdown(filtered.length > 0)
+          setSelectedProductIndex(-1) // Reset selection when focusing
         }}
         className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
       />
       
       {showProductDropdown && (
         <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
-          {filteredProducts.map((product: Product) => (
+          {filteredProducts.map((product: Product, index: number) => (
             <div
               key={product._id}
               onClick={() => handleProductSelect(product)}
-              className="px-4 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+              className={`px-4 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                index === selectedProductIndex 
+                  ? 'bg-blue-100 text-blue-900' 
+                  : 'hover:bg-gray-50'
+              }`}
             >
               <div className="flex items-center">
                 {/* {product.image ? (
