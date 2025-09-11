@@ -67,7 +67,7 @@ const CloseShiftButton = ({ variant = 'mobile', className = '' }: CloseShiftButt
         doctype: "POS Closing Entry",
         pos_profile: posProfileName,
         user: userInfo.full_name || userInfo.name,
-        company: "Great Eastern",
+        company: "AVU Hyper Market",
         period_start_date: shiftStartTime,
         period_end_date: new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ''),
         pos_opening_entry: posOpeningEntryName

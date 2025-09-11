@@ -715,7 +715,7 @@ const OrderPage = () => {
   const getNextInvoiceSeqNo = (): number => {
     try {
       const currentSeqNo = localStorage.getItem('invoiceSeqNo')
-      const seqNo = currentSeqNo ? parseInt(currentSeqNo, 10) : 1
+      const seqNo = currentSeqNo ? parseInt(currentSeqNo, 10) + 1 : 1
       
       console.log('📊 Getting next invoice sequence number:', seqNo)
       return seqNo
@@ -943,7 +943,7 @@ const OrderPage = () => {
         }
         
         // Save to local DB first - this is the primary operation
-        // await localDB.put(invoiceData)
+        await localDB.put(invoiceData)
         console.log('Invoice saved to local database successfully')
         
         // Increment invoice sequence number after successful save
@@ -953,18 +953,18 @@ const OrderPage = () => {
         }
         
         // Now try to sync to remote (secondary operation)
-        // try {
-        //   console.log('Syncing to remote database...')
-          // const syncResult = await performSync('push')
-        //   if (syncResult.success) {
-        //     console.log('Remote sync completed successfully')
-        //   } else {
-        //     console.log('Remote sync failed:', syncResult.error)
-        //   }
-        // } catch (syncError) {
-        //   console.log('Remote sync failed, but order was saved locally:', syncError)
-        //   // Don't fail the entire operation - local save succeeded
-        // }
+        try {
+          console.log('Syncing to remote database...')
+          const syncResult = await performSync('push')
+          if (syncResult.success) {
+            console.log('Remote sync completed successfully')
+          } else {
+            console.log('Remote sync failed:', syncResult.error)
+          }
+        } catch (syncError) {
+          console.log('Remote sync failed, but order was saved locally:', syncError)
+          // Don't fail the entire operation - local save succeeded
+        }
         
         setSyncStatus('synced')
         showToast('Order submitted successfully!', 'success')
