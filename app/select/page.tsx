@@ -301,7 +301,7 @@ const SelectPage = () => {
         period_start_date: shiftStartTime,
         custom_pos_terminal: selectedTerminalName, // Terminal name from erpnext_id lookup
         user: userInfo.name || userInfo.full_name,
-        company: "Great Eastern",
+        company: "AVU Hyper Market",
         balance_details: [
           {
             mode_of_payment: "Cash",
